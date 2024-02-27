@@ -1,6 +1,7 @@
 use std::{env, io::Error, process::exit};
 
 use args::{ArgumentsRequest, StartupArguments};
+use tokio::task::LocalSet;
 
 mod args;
 mod client;
@@ -34,10 +35,10 @@ fn main() {
         ArgumentsRequest::Run(startup_args) => startup_args,
     };
 
-    let runtime_result = tokio::runtime::Builder::new_multi_thread().enable_all().build();
+    let runtime_result = tokio::runtime::Builder::new_current_thread().enable_all().build();
 
     let result = match runtime_result {
-        Ok(runtime) => runtime.block_on(async_main(startup_args)),
+        Ok(runtime) => LocalSet::new().block_on(&runtime, async_main(startup_args)),
         Err(err) => {
             eprintln!("Failed to start Tokio runtime: {err}");
             exit(1);
