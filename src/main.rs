@@ -10,8 +10,8 @@ mod utils;
 
 pub const PORT: u16 = 4949;
 
-pub const MAX_DATAGRAM_SIZE: usize = 1350;
-pub const MAX_IDLE_TIMEOUT: u64 = 5000;
+pub const KEEPALIVE_INTERVAL_PERIOD_MILLIS: u64 = 3000;
+pub const MAX_IDLE_TIMEOUT_MILLIS: u32 = 5000;
 
 fn main() {
     let arguments = match args::parse_arguments(env::args()) {
@@ -52,8 +52,10 @@ fn main() {
 
 async fn async_main(startup_args: StartupArguments) -> Result<(), Error> {
     if startup_args.is_server {
-        server::run_server().await
+        server::run_server().await;
     } else {
-        client::run_client().await
+        client::run_client().await;
     }
+
+    Ok(())
 }
