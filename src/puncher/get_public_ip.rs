@@ -7,6 +7,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 const IPV4_PARSE_ERROR: &str = "Couldn't find public IP: Server responded with invalid IPv4 address";
 
+/// Gets this machine's publicly-visible IPv4 address with a request to `api.ipify.org`.
 pub async fn get_public_ipv4() -> io::Result<Ipv4Addr> {
     let iter = tokio::net::lookup_host("api.ipify.org:80").await?;
     let iter = iter.filter(|addr| addr.is_ipv4());

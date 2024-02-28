@@ -25,6 +25,7 @@ pub enum DeserializeError {
     UnexpectedEnd,
     InvalidIpTypeByte,
     ZeroLaneCount,
+    OverflowingLaneCount,
     BadChecksum,
     TooLong,
 }
@@ -129,6 +130,11 @@ impl ConnectionCode {
         let lane_count = NonZeroU16::new(lane_count_u16).ok_or(DeserializeError::ZeroLaneCount)?;
         index += 2;
 
+        let (_, overflows) = port_start.overflowing_add(lane_count.get());
+        if overflows {
+            return Err(DeserializeError::OverflowingLaneCount);
+        }
+
         check_buf_len(buf, index + 8)?;
         let mut timestamp_bytes = [0u8; 8];
         timestamp_bytes.copy_from_slice(&buf[index..(index + 8)]);
@@ -176,8 +182,6 @@ mod tests {
 
     #[test]
     fn test1() {
-        println!("=========================================================");
-
         let addresses: [IpAddr; 5] = [
             IpAddr::V4("69.22.4.0".parse().unwrap()),
             IpAddr::V4("1.2.3.4".parse().unwrap()),
