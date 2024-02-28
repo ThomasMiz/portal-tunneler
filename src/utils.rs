@@ -6,3 +6,10 @@ pub async fn sleep_until_if_some(until: Option<Instant>) {
         None => std::future::pending().await,
     }
 }
+
+pub fn get_current_timestamp() -> u64 {
+    let now = std::time::SystemTime::now();
+    let unix_epoch = std::time::SystemTime::UNIX_EPOCH;
+    let duration = now.duration_since(unix_epoch).expect("It is **NOT** 1970, fix your fucking clock");
+    duration.as_secs()
+}

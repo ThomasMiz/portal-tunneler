@@ -4,7 +4,7 @@ use std::{
     time::Duration,
 };
 
-use quinn::{Connecting, Endpoint, IdleTimeout, RecvStream, SendStream, ServerConfig, VarInt};
+use quinn::{Connecting, Endpoint, EndpointConfig, IdleTimeout, RecvStream, SendStream, ServerConfig, TokioRuntime, VarInt};
 use tokio::select;
 
 use crate::{KEEPALIVE_INTERVAL_PERIOD_MILLIS, MAX_IDLE_TIMEOUT_MILLIS, PORT};
@@ -12,8 +12,7 @@ use crate::{KEEPALIVE_INTERVAL_PERIOD_MILLIS, MAX_IDLE_TIMEOUT_MILLIS, PORT};
 fn configure_server() -> (ServerConfig, Vec<u8>) {
     let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
     let cert_der = cert.serialize_der().unwrap();
-    let priv_key = cert.serialize_private_key_der();
-    let priv_key = rustls::PrivateKey(priv_key);
+    let priv_key = rustls::PrivateKey(cert.serialize_private_key_der());
     let cert_chain = vec![rustls::Certificate(cert_der.clone())];
 
     let mut server_config = ServerConfig::with_single_cert(cert_chain, priv_key).unwrap();
@@ -25,15 +24,21 @@ fn configure_server() -> (ServerConfig, Vec<u8>) {
     (server_config, cert_der)
 }
 
-pub fn make_server_endpoint(bind_addr: SocketAddr) -> (Endpoint, Vec<u8>) {
+pub async fn make_server_endpoint(bind_addr: SocketAddr) -> (Endpoint, Vec<u8>) {
+    let runtime = Arc::new(TokioRuntime);
+
+    let socket = tokio::net::UdpSocket::bind(bind_addr).await.unwrap();
+    let socket = socket.into_std().unwrap();
+
     let (server_config, server_cert) = configure_server();
-    let endpoint = Endpoint::server(server_config, bind_addr).unwrap();
+
+    let endpoint = Endpoint::new(EndpointConfig::default(), Some(server_config), socket, runtime).unwrap();
     (endpoint, server_cert)
 }
 
 pub async fn run_server() {
     let addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, PORT));
-    let (endpoint, _server_cert) = make_server_endpoint(addr);
+    let (endpoint, _server_cert) = make_server_endpoint(addr).await;
 
     loop {
         let incoming_connection = select! {

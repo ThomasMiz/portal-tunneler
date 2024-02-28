@@ -135,7 +135,9 @@ dependencies = [
 name = "juan"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "quinn",
+ "quinn-udp",
  "rcgen",
  "rustls",
  "tokio",
