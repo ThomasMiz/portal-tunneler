@@ -32,7 +32,7 @@ pub const MAX_IDLE_TIMEOUT_MILLIS: u32 = 5000;
 fn main() {
     let arguments = match args::parse_arguments(env::args()) {
         Err(err) => {
-            eprintln!("{err}\n\nType 'dust-devil --help' for a help menu");
+            eprintln!("{err}\n\nType 'juan --help' for a help menu");
             exit(1);
         }
         Ok(arguments) => arguments,
@@ -41,7 +41,7 @@ fn main() {
     let startup_args = match arguments {
         ArgumentsRequest::Version => {
             println!("{}", args::get_version_string());
-            println!("Your mother's favorite socks5 proxy server");
+            println!("Do NOT ask who Juan is.");
             return;
         }
         ArgumentsRequest::Help => {
