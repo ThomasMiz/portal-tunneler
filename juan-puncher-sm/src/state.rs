@@ -1,12 +1,11 @@
 use std::{io::Error, net::SocketAddr};
 
-use num_enum::{IntoPrimitive, TryFromPrimitive};
-
 use crate::packet::PacketDataError;
 
+/// Represents the possible statuses for a lane.
 #[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash, IntoPrimitive, TryFromPrimitive)]
-pub enum LaneStatus {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
+pub(crate) enum LaneStatus {
     /// The lane is attempting to connect, but hasn’t heard back from the remote peer.
     #[default]
     Connecting = 1,
@@ -25,11 +24,28 @@ pub enum LaneStatus {
     Blocked = 255,
 }
 
+impl LaneStatus {
+    pub fn from_u8(value: u8) -> Option<Self> {
+        match value {
+            1 => Some(Self::Connecting),
+            2 => Some(Self::Establishing),
+            3 => Some(Self::Selected),
+            255 => Some(Self::Blocked),
+            _ => None,
+        }
+    }
+
+    pub fn into_u8(self) -> u8 {
+        self as u8
+    }
+}
+
 #[derive(Debug)]
 pub enum LaneState {
     Connecting(ConnectingState),
     Establishing(EstablishingState),
     Selected(SelectedState),
+    Closed,
     Blocked(BlockReason),
 }
 
@@ -40,28 +56,53 @@ impl Default for LaneState {
 }
 
 impl LaneState {
+    /// Creates a new [`LaneState`] in the initial `Connecting` state.
     pub const fn new() -> Self {
         Self::Connecting(ConnectingState::new())
     }
 
+    /// Gets whether this lane is connecting.
     pub fn is_connecting(&self) -> bool {
         matches!(self, Self::Connecting(_))
     }
 
+    /// Gets whether this lane is establishing.
     pub fn is_establishing(&self) -> bool {
         matches!(self, Self::Establishing(_))
     }
 
+    /// Gets whether this lane is selected.
     pub fn is_selected(&self) -> bool {
         matches!(self, Self::Selected(_))
     }
 
-    pub fn is_open(&self) -> bool {
-        !self.is_blocked()
+    /// Gets whether this lane is closed.
+    pub fn is_closed(&self) -> bool {
+        matches!(self, Self::Closed)
     }
 
+    /// Gets whether this lane is blocked.
     pub fn is_blocked(&self) -> bool {
         matches!(self, Self::Blocked(_))
+    }
+
+    /// Gets whether this lane is still active. That is, if it's not blocked nor closed.
+    pub fn is_active(&self) -> bool {
+        matches!(self, Self::Connecting(_) | Self::Establishing(_) | Self::Selected(_))
+    }
+
+    /// Gets this lane's status.
+    ///
+    /// # Panics
+    /// Panics if this lane is [`LaneState::Closed`], as that state has no corresponding status.
+    pub(crate) fn status(&self) -> LaneStatus {
+        match self {
+            Self::Connecting(_) => LaneStatus::Connecting,
+            Self::Establishing(_) => LaneStatus::Establishing,
+            Self::Selected(_) => LaneStatus::Selected,
+            Self::Closed => panic!("Cannot get status of closed lane"),
+            Self::Blocked(_) => LaneStatus::Blocked,
+        }
     }
 }
 
@@ -93,20 +134,15 @@ impl EstablishingState {
 pub struct SelectedState {
     /// Whether any packet was sent since the lane got to this state.
     pub sent: bool,
-
-    /// Whether a packet was received with the `Selected` status on this lane.
-    pub received_selected: bool,
 }
 
 impl SelectedState {
     pub const fn new() -> Self {
-        Self {
-            sent: false,
-            received_selected: false,
-        }
+        Self { sent: false }
     }
 }
 
+/// The possible reason for which a lane may get blocked.
 #[derive(Debug)]
 pub enum BlockReason {
     /// An IO error occurred while receiving data on this lane.
