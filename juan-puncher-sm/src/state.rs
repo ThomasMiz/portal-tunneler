@@ -25,7 +25,7 @@ pub(crate) enum LaneStatus {
 }
 
 impl LaneStatus {
-    pub fn from_u8(value: u8) -> Option<Self> {
+    pub const fn from_u8(value: u8) -> Option<Self> {
         match value {
             1 => Some(Self::Connecting),
             2 => Some(Self::Establishing),
@@ -35,7 +35,7 @@ impl LaneStatus {
         }
     }
 
-    pub fn into_u8(self) -> u8 {
+    pub const fn into_u8(self) -> u8 {
         self as u8
     }
 }
