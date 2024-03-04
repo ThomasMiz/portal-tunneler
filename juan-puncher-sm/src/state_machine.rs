@@ -39,7 +39,7 @@ impl StateMachineNode for ConnectingState {
     ) -> Result<TransitionRequest, BlockReason> {
         match received_lane_status {
             LaneStatus::Establishing if !self.sent => Err(BlockReason::UnexpectedTransition),
-            LaneStatus::Establishing if !is_server && !has_selected => Ok(TransitionRequest::Selected),
+            LaneStatus::Establishing if is_server && !has_selected => Ok(TransitionRequest::Selected),
             LaneStatus::Connecting | LaneStatus::Establishing => Ok(TransitionRequest::Establishing),
             LaneStatus::Selected => Err(BlockReason::UnexpectedTransition),
             LaneStatus::Blocked => Err(BlockReason::BlockedByRemote),
@@ -60,7 +60,7 @@ impl StateMachineNode for EstablishingState {
     ) -> Result<TransitionRequest, BlockReason> {
         match received_lane_status {
             LaneStatus::Selected if !self.sent || is_server => Err(BlockReason::UnexpectedTransition),
-            LaneStatus::Establishing if !is_server && !has_selected => Ok(TransitionRequest::Selected),
+            LaneStatus::Establishing if is_server && !has_selected => Ok(TransitionRequest::Selected),
             LaneStatus::Connecting | LaneStatus::Establishing => Ok(TransitionRequest::Remain),
             LaneStatus::Selected => Ok(TransitionRequest::Selected),
             LaneStatus::Blocked => Err(BlockReason::BlockedByRemote),

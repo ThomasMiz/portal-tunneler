@@ -2,8 +2,8 @@ mod packet;
 mod state;
 mod state_machine;
 
-use std::cmp::Ordering;
 use std::io;
+use std::io::Error;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::num::NonZeroU16;
@@ -16,8 +16,9 @@ use state_machine::TransitionRequest;
 pub use crate::packet::*;
 pub use crate::state::*;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SendInfo {
-    pub from_port: u16,
+    pub from_port: NonZeroU16,
     pub to: SocketAddr,
     pub length: usize,
 }
@@ -68,32 +69,30 @@ pub enum PuncherAction {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Ports {
-    pub local: u16,
-    pub remote: u16,
+    pub local: NonZeroU16,
+    pub remote: NonZeroU16,
 }
 
 pub struct Puncher {
-    my_address: IpAddr,
-    my_port_start: u16,
+    my_port_start: NonZeroU16,
     remote_address: IpAddr,
-    remote_port_start: u16,
+    remote_port_start: NonZeroU16,
     lane_count: NonZeroU16,
     open_lanes_count: u16,
     lanes: Vec<Lane>,
     is_server: bool,
     selected_lane_index: Option<u16>,
     tick_period: Duration,
-    last_tick_instant: Instant,
+    next_tick_instant: Instant,
     timeout_instant: Instant,
 }
 
 impl Puncher {
     pub fn new(
         is_server: bool,
-        my_address: IpAddr,
-        my_port_start: u16,
+        my_port_start: NonZeroU16,
         remote_address: IpAddr,
-        remote_port_start: u16,
+        remote_port_start: NonZeroU16,
         lane_count: NonZeroU16,
         tick_period: Duration,
         timeout: Duration,
@@ -106,21 +105,10 @@ impl Puncher {
             panic!("lane_count would overflow remote_port_start");
         }
 
-        let ip_comparison = match (my_address, remote_address) {
-            (IpAddr::V4(me), IpAddr::V4(other)) => me.cmp(&other),
-            (IpAddr::V6(me), IpAddr::V6(other)) => me.cmp(&other),
-            _ => panic!("my_address and remote_address are not the same IpAddr variant"),
-        };
-
-        if ip_comparison == Ordering::Equal {
-            panic!("my_address and remote_address must not be the same");
-        }
-
         let mut lanes = Vec::with_capacity(lane_count.get() as usize);
-        lanes.fill_with(|| Lane::new());
+        lanes.resize_with(lane_count.get() as usize, || Lane::new());
 
         Self {
-            my_address,
             my_port_start,
             remote_address,
             remote_port_start,
@@ -130,16 +118,12 @@ impl Puncher {
             is_server,
             selected_lane_index: None,
             tick_period,
-            last_tick_instant: Instant::now(),
+            next_tick_instant: Instant::now().checked_add(tick_period).unwrap(),
             timeout_instant: Instant::now().checked_add(timeout).unwrap(),
         }
     }
 
-    pub fn my_address(&self) -> IpAddr {
-        self.my_address
-    }
-
-    pub fn my_port_start(&self) -> u16 {
+    pub fn my_port_start(&self) -> NonZeroU16 {
         self.my_port_start
     }
 
@@ -147,7 +131,7 @@ impl Puncher {
         self.remote_address
     }
 
-    pub fn remote_port_start(&self) -> u16 {
+    pub fn remote_port_start(&self) -> NonZeroU16 {
         self.remote_port_start
     }
 
@@ -172,15 +156,18 @@ impl Puncher {
             return None;
         }
 
-        let next_tick = self.last_tick_instant.checked_add(self.tick_period)?;
-        if next_tick >= self.last_tick_instant {
-            self.last_tick_instant = next_tick;
+        let mut next_tick = self.next_tick_instant;
+
+        if self.selected_lane_index.is_none() {
+            next_tick = next_tick.min(self.timeout_instant);
         }
 
-        Some(next_tick.min(self.timeout_instant))
+        Some(next_tick)
     }
 
     pub fn tick(&mut self) {
+        self.next_tick_instant = self.next_tick_instant.checked_add(self.tick_period).unwrap();
+
         if let Some(selected_index) = self.selected_lane_index {
             self.lanes[selected_index as usize].needs_send = self.is_server;
         } else {
@@ -194,21 +181,21 @@ impl Puncher {
         }
     }
 
-    pub fn received_from<'a>(&mut self, recv_result: io::Result<(&'a [u8], SocketAddr)>, to_port: u16) -> Option<&'a [u8]> {
+    pub fn received_from<'a>(&mut self, recv_result: io::Result<(&'a [u8], SocketAddr)>, local_port: u16) -> Option<&'a [u8]> {
         // Find the index of the lane from the port number the packet arrived at. If this is not
         // a valid value, panic (since this is wrong usage of the state machine).
-        let lane_index = match to_port.checked_sub(self.my_port_start) {
+        let lane_index = match local_port.checked_sub(self.my_port_start.get()) {
             Some(i) if i < self.lanes.len() as u16 => i,
             _ => panic!(
-                "received_from called with an invalid port: {to_port} but port range is {} to {}",
+                "received_from called with an invalid port: {local_port} but port range is {} to {}",
                 self.my_port_start,
-                self.my_port_start + self.lane_count.get() - 1
+                self.my_port_start.get() + self.lane_count.get() - 1
             ),
         };
 
         // Get the lane's state. If the lane is blocked, then we ignore any of its incoming packet.
         let lane = &mut self.lanes[lane_index as usize];
-        if lane.state.is_blocked() {
+        if !lane.state.is_active() {
             return None;
         }
 
@@ -222,8 +209,8 @@ impl Puncher {
 
         // If the packet's source IP or port is not what we expect, block the lane due to interference.
         if from.ip() != self.remote_address
-            || from.port() < self.remote_port_start
-            || from.port() >= (self.remote_port_start + self.lane_count.get())
+            || from.port() < self.remote_port_start.get()
+            || from.port() >= (self.remote_port_start.get() + self.lane_count.get())
         {
             self.block_lane(lane_index, BlockReason::Interference(from));
             return None;
@@ -237,6 +224,9 @@ impl Puncher {
                 return None;
             }
         };
+
+        // TODO: Remove!!!
+        println!("Packet data has status: {:?}", packet_data.lane_status);
 
         if packet_data.lane_status == LaneStatus::Blocked {
             self.block_lane(lane_index, BlockReason::BlockedByRemote);
@@ -278,18 +268,33 @@ impl Puncher {
             let length = PacketData::new(lane.state.status(), application_data).write_to(buf);
 
             SendInfo {
-                from_port: self.my_port_start + lane_index as u16,
-                to: SocketAddr::new(self.remote_address, self.remote_port_start + lane_index as u16),
+                from_port: self.my_port_start.saturating_add(lane_index as u16),
+                to: SocketAddr::new(self.remote_address, self.remote_port_start.get() + lane_index as u16),
                 length,
             }
         })
     }
 
+    pub fn send_failed(&mut self, local_port: u16, error: Error) {
+        let lane_index = match local_port.checked_sub(self.my_port_start.get()) {
+            Some(i) if i < self.lanes.len() as u16 => i,
+            _ => panic!(
+                "on_send_failed called with an invalid port: {local_port} but port range is {} to {}",
+                self.my_port_start,
+                self.my_port_start.get() + self.lane_count.get() - 1
+            ),
+        };
+
+        if self.lanes[lane_index as usize].state.is_active() {
+            self.block_lane(lane_index, BlockReason::SendError(error));
+        }
+    }
+
     pub fn poll(&self) -> PuncherAction {
         if let Some(selected_index) = self.selected_lane_index {
             let ports = Ports {
-                local: self.my_port_start + selected_index,
-                remote: self.remote_port_start + selected_index,
+                local: self.my_port_start.saturating_add(selected_index),
+                remote: self.remote_port_start.saturating_add(selected_index),
             };
 
             return match self.is_server {
@@ -311,8 +316,8 @@ impl Puncher {
 
     fn block_lane(&mut self, lane_index: u16, reason: BlockReason) {
         let lane = &mut self.lanes[lane_index as usize];
-        if lane.state.is_blocked() {
-            panic!("Attempted to double-lock lane {lane_index} with reason {reason:?}")
+        if !lane.state.is_active() {
+            panic!("Attempted to block inactive lane {lane_index} with reason {reason:?}")
         }
 
         lane.state = LaneState::Blocked(reason);
