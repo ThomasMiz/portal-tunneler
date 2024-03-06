@@ -26,8 +26,8 @@ mod utils;
 
 pub const PORT: u16 = 4949;
 
-pub const KEEPALIVE_INTERVAL_PERIOD_MILLIS: u64 = 3000;
-pub const MAX_IDLE_TIMEOUT_MILLIS: u32 = 5000;
+pub const KEEPALIVE_INTERVAL_PERIOD_MILLIS: u64 = 5000;
+pub const MAX_IDLE_TIMEOUT_MILLIS: u32 = 24000;
 
 fn main() {
     let arguments = match args::parse_arguments(env::args()) {
