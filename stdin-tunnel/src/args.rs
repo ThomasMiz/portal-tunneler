@@ -184,7 +184,7 @@ where
             let port = parse_port_arg(arg, args.next()).map_err(ArgumentsError::InvalidPort)?;
             port_start = Some(port);
         } else if arg.eq("-r") || arg.eq_ignore_ascii_case("--remote-address") {
-            let address = parse_address_arg(arg, args.next()).map_err(|e| ArgumentsError::RemoteAddressError(e))?;
+            let address = parse_address_arg(arg, args.next()).map_err(ArgumentsError::RemoteAddressError)?;
             remote_address = Some(address);
         } else if arg.eq("-q") || arg.eq_ignore_ascii_case("--remote-port-start") {
             let port = parse_port_arg(arg, args.next()).map_err(ArgumentsError::InvalidPort)?;

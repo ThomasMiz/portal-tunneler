@@ -7,11 +7,11 @@ use std::{
 use tokio::{net::UdpSocket, task::LocalSet};
 
 fn get_forward_port(from_port: u16) -> Option<u16> {
-    if from_port >= 5000 && from_port < 6000 {
+    if (5000..6000).contains(&from_port) {
         return Some(from_port + 1000);
     }
 
-    if from_port >= 6000 && from_port < 7000 {
+    if (6000..7000).contains(&from_port) {
         return Some(from_port - 1000);
     }
 
@@ -71,7 +71,7 @@ async fn tuluburu(socket: UdpSocket) {
 
             tokio::time::sleep(Duration::from_millis(rand::random::<u64>() % 1001 + 500)).await;
             let dest = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, forward_port));
-            match socket.send_to(&mut buf[..size], dest).await {
+            match socket.send_to(&buf[..size], dest).await {
                 Ok(sent) => {
                     println!("Socket {my_addr} forwarded {size} bytes from {from} to {sent} bytes to {dest}");
                 }

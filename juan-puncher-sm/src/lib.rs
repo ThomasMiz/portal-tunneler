@@ -30,11 +30,17 @@ pub struct Lane {
 }
 
 impl Lane {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             state: LaneState::new(),
             needs_send: true,
         }
+    }
+}
+
+impl Default for Lane {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -106,7 +112,7 @@ impl Puncher {
         }
 
         let mut lanes = Vec::with_capacity(lane_count.get() as usize);
-        lanes.resize_with(lane_count.get() as usize, || Lane::new());
+        lanes.resize_with(lane_count.get() as usize, Lane::new);
 
         Self {
             my_port_start,

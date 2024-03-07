@@ -99,7 +99,7 @@ impl<'a> PacketData<'a> {
             return Err(PacketDataError::PacketTooShort);
         }
 
-        if &buf[..PREAMBLE_SIZE] != PREAMBLE {
+        if buf[..PREAMBLE_SIZE] != PREAMBLE {
             return Err(PacketDataError::WrongPreamble);
         }
 
