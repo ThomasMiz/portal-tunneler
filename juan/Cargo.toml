@@ -11,5 +11,5 @@ quinn = { version = "0.10.2", features = ["tls-rustls"] }
 quinn-udp = { version = "0.4.1" }
 rustls = { version = "0.21.10", features = ["dangerous_configuration"] }
 rcgen = "0.12.1"
-base64 = { version = "0.21.7" }
+base64 = { version = "0.22.0" }
 juan-puncher-sm = { path = "../juan-puncher-sm", version = "0.1.0" }

@@ -1,13 +1,13 @@
-use std::{
-    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
-    sync::Arc,
-    time::Duration,
-};
+use std::{sync::Arc, time::Duration};
 
 use quinn::{Connecting, Endpoint, EndpointConfig, IdleTimeout, RecvStream, SendStream, ServerConfig, TokioRuntime, VarInt};
-use tokio::select;
+use tokio::{
+    io::{stdin, stdout},
+    join, select,
+    task::AbortHandle,
+};
 
-use crate::{KEEPALIVE_INTERVAL_PERIOD_MILLIS, MAX_IDLE_TIMEOUT_MILLIS, PORT};
+use crate::{shared_socket::SharedUdpSocket, KEEPALIVE_INTERVAL_PERIOD_MILLIS, MAX_IDLE_TIMEOUT_MILLIS};
 
 fn configure_server() -> (ServerConfig, Vec<u8>) {
     let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
@@ -24,28 +24,26 @@ fn configure_server() -> (ServerConfig, Vec<u8>) {
     (server_config, cert_der)
 }
 
-pub async fn make_server_endpoint(bind_addr: SocketAddr) -> (Endpoint, Vec<u8>) {
+fn make_server_endpoint(socket: SharedUdpSocket) -> (Endpoint, Vec<u8>) {
     let runtime = Arc::new(TokioRuntime);
-
-    let socket = tokio::net::UdpSocket::bind(bind_addr).await.unwrap();
-    let socket = socket.into_std().unwrap();
-
     let (server_config, server_cert) = configure_server();
 
-    let endpoint = Endpoint::new(EndpointConfig::default(), Some(server_config), socket, runtime).unwrap();
+    let endpoint = Endpoint::new_with_abstract_socket(EndpointConfig::default(), Some(server_config), socket, runtime).unwrap();
     (endpoint, server_cert)
 }
 
-pub async fn run_server() {
-    let addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, PORT));
-    let (endpoint, _server_cert) = make_server_endpoint(addr).await;
+pub async fn run_server(socket: SharedUdpSocket, mut abort_on_connect: Option<AbortHandle>) {
+    println!("Starting server on {}", socket.local_addr().unwrap());
+    let (endpoint, _server_cert) = make_server_endpoint(socket);
 
     loop {
         let incoming_connection = select! {
             biased;
             v = endpoint.accept() => v,
-            _ = tokio::signal::ctrl_c() => break,
+            //_ = tokio::signal::ctrl_c() => break, // TODO: Find out why Ctrl-C hangs instead of closing
         };
+
+        abort_on_connect.take().inspect(|handle| handle.abort());
 
         let incoming_connection = match incoming_connection {
             Some(c) => c,
@@ -88,36 +86,14 @@ async fn handle_connection(incoming_connection: Connecting) {
 }
 
 async fn handle_bi_stream(mut send_stream: SendStream, mut recv_stream: RecvStream) {
-    let mut buf = [0u8; 0x2000];
+    println!("Doing bidirectional copy");
 
-    loop {
-        let bytes_read = match recv_stream.read(&mut buf).await {
-            Ok(Some(v)) => v,
-            Ok(None) => {
-                println!(
-                    "Stream {} closed, shutting down related send stream {}",
-                    recv_stream.id(),
-                    send_stream.id()
-                );
-                if let Err(write_error) = send_stream.finish().await {
-                    println!("Failed to gracefully finish send stream {}: {write_error}", send_stream.id());
-                }
+    let mut stdout = stdout();
+    let mut stdin = stdin();
+    let (r1, r2) = join!(
+        tokio::io::copy(&mut recv_stream, &mut stdout),
+        tokio::io::copy(&mut stdin, &mut send_stream),
+    );
 
-                break;
-            }
-            Err(read_error) => {
-                println!("Stream {} rejected read with error {read_error}", recv_stream.id());
-                break;
-            }
-        };
-
-        for ele in &mut buf[..bytes_read] {
-            *ele = ele.to_ascii_lowercase();
-        }
-
-        if let Err(write_error) = send_stream.write_all(&buf[..bytes_read]).await {
-            println!("Stream {} rejected write with error: {write_error}", send_stream.id());
-            break;
-        }
-    }
+    println!("Finished stream:\nstream-to-stdout result: {r1:?}\nstdin-to-stream result: {r2:?}");
 }

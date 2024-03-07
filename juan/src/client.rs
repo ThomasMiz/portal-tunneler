@@ -1,15 +1,12 @@
-use std::{
-    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
-    sync::Arc,
-};
+use std::{net::SocketAddr, sync::Arc};
 
-use quinn::{ClientConfig, Endpoint, IdleTimeout, TransportConfig, VarInt};
+use quinn::{ClientConfig, Endpoint, EndpointConfig, IdleTimeout, RecvStream, SendStream, TokioRuntime, TransportConfig, VarInt};
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    select,
+    io::{stdin, stdout},
+    join,
 };
 
-use crate::{MAX_IDLE_TIMEOUT_MILLIS, PORT};
+use crate::{shared_socket::SharedUdpSocket, MAX_IDLE_TIMEOUT_MILLIS};
 
 fn configure_client() -> ClientConfig {
     let crypto = rustls::ClientConfig::builder()
@@ -27,17 +24,39 @@ fn configure_client() -> ClientConfig {
     client_config
 }
 
-pub async fn run_client() {
-    let server_addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, PORT));
+fn make_client_endpoint(socket: SharedUdpSocket) -> Endpoint {
+    let runtime = Arc::new(TokioRuntime);
 
-    let local_addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0));
-    let mut endpoint = Endpoint::client(local_addr).unwrap();
+    let mut endpoint = Endpoint::new_with_abstract_socket(EndpointConfig::default(), None, socket, runtime).unwrap();
     endpoint.set_default_client_config(configure_client());
+    endpoint
+}
 
-    let connection = endpoint.connect(server_addr, "localhost").unwrap().await.unwrap();
-    println!("Client connected from {local_addr} to {server_addr}");
+pub async fn run_client(socket: SharedUdpSocket, server_addr: SocketAddr) {
+    let local_addr = socket.local_addr().unwrap();
+    let endpoint = make_client_endpoint(socket);
 
-    let (mut send_stream, mut recv_stream) = match connection.open_bi().await {
+    let connection = loop {
+        println!("Attempting to connect from {local_addr} to {server_addr}");
+        let connecting = match endpoint.connect(server_addr, "localhost") {
+            Ok(c) => c,
+            Err(e) => {
+                println!("Connect error: {e}");
+                continue;
+            }
+        };
+
+        println!("Connecting!");
+        match connecting.await {
+            Ok(c) => break c,
+            Err(e) => println!("Connecting error: {e}"),
+        }
+    };
+
+    println!("Client connected to {server_addr}");
+
+    // IMPORTANT NOTE: QUIC streams are not received on the other end until actually used!
+    let (send_stream, recv_stream) = match connection.open_bi().await {
         Ok(t) => t,
         Err(error) => {
             println!("Failed to open bidirectional stream: {error}");
@@ -46,51 +65,23 @@ pub async fn run_client() {
     };
 
     println!("Opened bidirectional stream {} {}", send_stream.id(), recv_stream.id());
-
-    let mut recv_buf = [0u8; 0x2000];
-    let mut stdin_buf = [0u8; 0x2000];
-    let mut stdin = tokio::io::stdin();
-
-    loop {
-        select! {
-            biased;
-            read_result = recv_stream.read(&mut recv_buf) => {
-                let bytes_read = match read_result {
-                    Ok(Some(v)) => v,
-                    Ok(None) => {
-                        println!("Recv stream closed prematurely");
-                        break;
-                    }
-                    Err(error) => {
-                        println!("Read from recv stream failed: {error}");
-                        break;
-                    },
-                };
-
-                if let Err(error) = tokio::io::stdout().write_all(&recv_buf[..bytes_read]).await {
-                    println!("Write to stdout failed: {error}");
-                    break;
-                }
-            }
-            read_result = stdin.read(&mut stdin_buf) => {
-                let bytes_read = match read_result {
-                    Ok(v) => v,
-                    Err(error) => {
-                        println!("Read from stdin failed: {error}");
-                        break;
-                    },
-                };
-
-                if let Err(error) = send_stream.write_all(&stdin_buf[..bytes_read]).await {
-                    println!("Write to send stream failed: {error}");
-                    break;
-                }
-            }
-        }
-    }
+    handle_bi_stream(send_stream, recv_stream).await;
 
     endpoint.close(VarInt::default(), b"Adios, fuckbois!");
     endpoint.wait_idle().await;
+}
+
+async fn handle_bi_stream(mut send_stream: SendStream, mut recv_stream: RecvStream) {
+    println!("Doing bidirectional copy");
+
+    let mut stdout = stdout();
+    let mut stdin = stdin();
+    let (r1, r2) = join!(
+        tokio::io::copy(&mut recv_stream, &mut stdout),
+        tokio::io::copy(&mut stdin, &mut send_stream),
+    );
+
+    println!("Finished stream:\nstream-to-stdout result: {r1:?}\nstdin-to-stream result: {r2:?}");
 }
 
 struct SkipServerVerification;

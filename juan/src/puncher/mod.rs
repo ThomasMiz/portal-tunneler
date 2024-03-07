@@ -1,79 +1,152 @@
 use std::{
-    io::{self, Error, ErrorKind},
+    io::{Error, ErrorKind},
     net::{IpAddr, SocketAddr},
     num::NonZeroU16,
+    time::Duration,
 };
 
-use tokio::net::UdpSocket;
+use juan_puncher_sm as sm;
 
-use self::{connection_code::ConnectionCode, socket_binder::bind_sockets};
+use tokio::{net::UdpSocket, select, task::JoinHandle};
+
+use crate::{
+    shared_socket::SharedUdpSocket,
+    utils::{recv_from_any, sleep_until_if_some},
+};
 
 pub mod connection_code;
 pub mod get_public_ip;
 pub mod socket_binder;
 
-#[derive(Debug)]
-pub struct PuncherStarter {
-    sockets: Vec<std::net::UdpSocket>,
-}
-
-impl PuncherStarter {
-    pub fn new(bind_address: SocketAddr, lane_count: NonZeroU16) -> io::Result<Self> {
-        Ok(Self {
-            sockets: bind_sockets(bind_address, lane_count)?,
-        })
-    }
-
-    pub fn generate_connection_code(&self, public_address: IpAddr) -> ConnectionCode {
-        let first_address = self.sockets.first().unwrap().local_addr().unwrap();
-        ConnectionCode::new(
-            public_address,
-            first_address.port(),
-            NonZeroU16::new(self.sockets.len() as u16).unwrap(),
-        )
-    }
-
-    pub fn set_remote(self, remote_address: IpAddr, port_start: u16, lane_count: NonZeroU16) -> io::Result<Puncher> {
-        let (_, overflows) = port_start.overflowing_add(lane_count.get());
-        if overflows {
-            return Err(Error::new(ErrorKind::InvalidData, "The lane count overflows the port number"));
-        }
-
-        let mut lanes = Vec::with_capacity(self.sockets.len());
-
-        let mut target_port = port_start;
-        for socket in self.sockets {
-            lanes.push(PunchLane {
-                socket: tokio::net::UdpSocket::from_std(socket)?,
-                target_port,
-                status: PunchLaneStatus::Connecting,
-            });
-
-            target_port += 1;
-        }
-
-        Ok(Puncher { remote_address, lanes })
-    }
-}
-
-#[derive(Debug)]
-pub struct Puncher {
+pub async fn punch_connection(
+    is_server: bool,
+    mut sockets: Vec<UdpSocket>,
     remote_address: IpAddr,
-    lanes: Vec<PunchLane>,
+    remote_port_start: NonZeroU16,
+    lane_count: NonZeroU16,
+) -> Result<(SharedUdpSocket, Option<JoinHandle<()>>, SocketAddr), Error> {
+    let port_start = NonZeroU16::new(sockets[0].local_addr().unwrap().port()).unwrap();
+
+    let mut puncher = sm::Puncher::new(
+        is_server,
+        port_start,
+        remote_address,
+        remote_port_start,
+        lane_count,
+        Duration::from_millis(1500),
+        Duration::from_secs(20),
+    );
+
+    let mut buf = [0u8; sm::MAX_REASONABLE_PAYLOAD];
+    let mut packet_counter = 0u32;
+
+    println!("Entering loop");
+    let ports = loop {
+        while let Some(send_info) = puncher.send_to(&mut buf, &packet_counter.to_le_bytes()) {
+            println!(
+                "Sending {} bytes from port {} to {} with counter {packet_counter}",
+                send_info.length, send_info.from_port, send_info.to
+            );
+            let index = (send_info.from_port.get() - port_start.get()) as usize;
+            let send_result = sockets[index].send_to(&buf[..send_info.length], send_info.to).await;
+            println!(
+                "Sent {} bytes from {} to {}",
+                send_info.length,
+                sockets[index].local_addr().unwrap(),
+                send_info.to
+            );
+            if let Err(error) = send_result {
+                println!("Send failed!");
+                puncher.send_failed(send_info.from_port.get(), error);
+            }
+            packet_counter += 1;
+        }
+
+        select! {
+            biased;
+            (index, result) = recv_from_any(&sockets, &mut buf) => {
+                println!("Received packet from port {}: {result:?}", port_start.get() + index as u16);
+                let result = result.map(|(len, addr)| (&buf[..len], addr));
+
+                let maybe_application_data = puncher.received_from(result, port_start.get() + index as u16);
+
+                if let Some(application_data) = maybe_application_data {
+                    if application_data.len() == 4 {
+                        let counter = u32::from_le_bytes(*application_data.first_chunk().unwrap());
+                        println!("Application data with counter {counter}");
+                    } else {
+                        println!("Unknown application data with length {}", application_data.len());
+                    }
+                } else {
+                    println!("(No application data)");
+                }
+            }
+            _ = sleep_until_if_some(puncher.next_tick_instant()) => {
+                println!("Ticking");
+                puncher.tick();
+            }
+        }
+
+        let action = puncher.poll();
+        println!("Puncher polled: {action:?}");
+
+        match action {
+            sm::PuncherAction::Wait => {}
+            sm::PuncherAction::Connect(ports) => break ports,
+            sm::PuncherAction::Listen(ports) => break ports,
+            sm::PuncherAction::Failed => {
+                return Err(Error::new(ErrorKind::Other, "Failed to establish a connection on any lane"));
+            }
+            sm::PuncherAction::Timeout => {
+                return Err(Error::new(ErrorKind::Other, "Failed to establish a connection before the timeout"));
+            }
+        }
+    };
+
+    let socket_index = (ports.local.get() - port_start.get()) as usize;
+    let socket = sockets.swap_remove(socket_index);
+    drop(sockets);
+    println!("Selected socket index {socket_index} addr {}", socket.local_addr().unwrap());
+
+    let socket = SharedUdpSocket::new(socket).unwrap();
+    let socket2 = SharedUdpSocket::clone(&socket);
+
+    let handle = match is_server {
+        false => None,
+        true => Some(tokio::task::spawn_local(async move {
+            server_background_task(socket2, puncher, packet_counter).await;
+        })),
+    };
+
+    let remote_address = SocketAddr::new(remote_address, ports.remote.get());
+    Ok((socket, handle, remote_address))
 }
 
-#[derive(Debug)]
-pub struct PunchLane {
-    socket: UdpSocket,
-    target_port: u16,
-    status: PunchLaneStatus,
-}
+async fn server_background_task(socket: SharedUdpSocket, mut puncher: sm::Puncher, mut packet_counter: u32) {
+    println!("Started background task to keep sending packets");
+    let mut buf = [0u8; sm::MAX_REASONABLE_PAYLOAD];
+    loop {
+        println!("Another background tick");
+        puncher.tick();
+        while let Some(send_info) = puncher.send_to(&mut buf, &packet_counter.to_le_bytes()) {
+            println!(
+                "Sending {} bytes from port {} to {} with counter {packet_counter}",
+                send_info.length, send_info.from_port, send_info.to
+            );
+            let send_result = socket.send_to(&buf[..send_info.length], send_info.to).await;
+            println!(
+                "Sent {} bytes from {} to {}",
+                send_info.length,
+                socket.local_addr().unwrap(),
+                send_info.to
+            );
+            if let Err(error) = send_result {
+                println!("Send failed!");
+                puncher.send_failed(send_info.from_port.get(), error);
+            }
+            packet_counter += 1;
+        }
 
-#[derive(Debug)]
-pub enum PunchLaneStatus {
-    Connecting,
-    Connected(u16),
-    Occupied,
+        sleep_until_if_some(puncher.next_tick_instant()).await;
+    }
 }
-
-impl Puncher {}

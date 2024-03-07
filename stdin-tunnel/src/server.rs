@@ -3,9 +3,7 @@ use std::{sync::Arc, time::Duration};
 use quinn::{Connecting, Endpoint, EndpointConfig, IdleTimeout, RecvStream, SendStream, ServerConfig, TokioRuntime, VarInt};
 use tokio::{
     io::{stdin, stdout},
-    join,
-    net::TcpSocket,
-    select,
+    join, select,
     task::AbortHandle,
 };
 
@@ -98,13 +96,4 @@ async fn handle_bi_stream(mut send_stream: SendStream, mut recv_stream: RecvStre
     );
 
     println!("Finished stream:\nstream-to-stdout result: {r1:?}\nstdin-to-stream result: {r2:?}");
-
-    /*let mut tcp_stream = TcpSocket::new_v4().unwrap().connect("127.0.0.1:25565".parse().unwrap()).await.unwrap();
-    let (mut recv_half, mut send_half) = tcp_stream.split();
-    let (r1, r2) = join!(
-        tokio::io::copy(&mut recv_stream, &mut send_half),
-        tokio::io::copy(&mut recv_half, &mut send_stream),
-    );
-
-    println!("Finished stream:\nstream-to-stdout result: {r1:?}\nstdin-to-stream result: {r2:?}");*/
 }

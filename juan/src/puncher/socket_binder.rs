@@ -1,6 +1,6 @@
 use std::{
     io::{self, Error, ErrorKind},
-    net::{SocketAddr, UdpSocket},
+    net::SocketAddr,
     num::NonZeroU16,
 };
 
@@ -16,11 +16,16 @@ use std::{
 /// If binding a non-first socket fails, even with the fallback, then if there was a specific port
 /// an error will be returned immediately, otherwise the whole process will be retried up to three
 /// times.
-pub fn bind_sockets(bind_address: SocketAddr, lane_count: NonZeroU16) -> io::Result<Vec<UdpSocket>> {
+pub fn bind_sockets(bind_address: SocketAddr, lane_count: NonZeroU16) -> io::Result<Vec<tokio::net::UdpSocket>> {
     let mut sockets = Vec::with_capacity(lane_count.get() as usize);
 
     'outer: for _ in 0..3 {
-        sockets.push(UdpSocket::bind(bind_address)?);
+        let first_socket = std::net::UdpSocket::bind(bind_address).and_then(|socket| {
+            socket.set_nonblocking(true)?;
+            tokio::net::UdpSocket::from_std(socket)
+        })?;
+
+        sockets.push(first_socket);
         let mut going_up = true;
 
         while sockets.len() < lane_count.get() as usize {
@@ -55,9 +60,9 @@ pub fn bind_sockets(bind_address: SocketAddr, lane_count: NonZeroU16) -> io::Res
                 }
             };
 
-            let bind_result = UdpSocket::bind(next_address).and_then(|socket| {
+            let bind_result = std::net::UdpSocket::bind(next_address).and_then(|socket| {
                 socket.set_nonblocking(true)?;
-                Ok(socket)
+                tokio::net::UdpSocket::from_std(socket)
             });
 
             match bind_result {
