@@ -7,9 +7,9 @@ use std::{
 };
 
 use args::{ArgumentsRequest, StartupArguments};
+
 use tokio::{
-    io::{stdin, AsyncBufReadExt, BufReader},
-    task::LocalSet,
+    io::{stdin, AsyncBufReadExt, BufReader}, task::LocalSet
 };
 
 use crate::puncher::{
@@ -27,8 +27,8 @@ mod utils;
 
 pub const PORT: u16 = 4949;
 
-pub const KEEPALIVE_INTERVAL_PERIOD_MILLIS: u64 = 5000;
-pub const MAX_IDLE_TIMEOUT_MILLIS: u32 = 24000;
+pub const KEEPALIVE_INTERVAL_PERIOD_MILLIS: u64 = 1000;
+pub const MAX_IDLE_TIMEOUT_MILLIS: u32 = 4000;
 
 fn main() {
     let arguments = match args::parse_arguments(env::args()) {
@@ -86,7 +86,13 @@ async fn async_main(startup_args: StartupArguments) -> Result<(), Error> {
 
     print!("Finding your public IP address...");
     std::io::stdout().flush()?;
-    let public_ip = get_public_ipv4().await?;
+    let public_ip = match startup_args.my_ip {
+        Some(ip) => match ip {
+            IpAddr::V4(ipv4) => ipv4,
+            IpAddr::V6(_) => panic!("Support for IPv6 is not implemented yet"),
+        },
+        None => get_public_ipv4().await?,
+    };
     println!(" {public_ip}");
 
     let connection_code = ConnectionCode::new(IpAddr::V4(public_ip), port_start, lane_count);
@@ -123,8 +129,10 @@ async fn async_main(startup_args: StartupArguments) -> Result<(), Error> {
     )
     .await?;
 
+    println!("SOCKET BOUND AT {} REMOTE IS {remote_address}", socket.local_addr().unwrap());
+
     if startup_args.is_server {
-        server::run_server(socket, maybe_background_task.map(|h| h.abort_handle())).await;
+        server::run_server(socket, maybe_background_task).await;
     } else {
         client::run_client(socket, remote_address).await;
     }

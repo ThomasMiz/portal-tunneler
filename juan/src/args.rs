@@ -30,6 +30,7 @@ pub enum ArgumentsRequest {
 #[derive(Debug, PartialEq)]
 pub struct StartupArguments {
     pub is_server: bool,
+    pub my_ip: Option<IpAddr>,
     pub port_start: Option<NonZeroU16>,
     pub lane_count: NonZeroU16,
     pub tunnels: Vec<TunnelSpec>,
@@ -80,6 +81,7 @@ impl StartupArguments {
     pub fn empty() -> Self {
         Self {
             is_server: false,
+            my_ip: None,
             port_start: None,
             lane_count: DEFAULT_LANE_COUNT,
             tunnels: Vec::new(),
@@ -90,6 +92,7 @@ impl StartupArguments {
 #[derive(Debug, PartialEq, Eq)]
 pub enum ArgumentsError {
     UnknownArgument(String),
+    MyIpError(IpAddrErrorType),
     LaneCount(LaneCountErrorType),
     PortStart(PortErrorType),
     LocalTunnel(TunnelSpecErrorType),
@@ -100,12 +103,37 @@ impl fmt::Display for ArgumentsError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::UnknownArgument(arg) => write!(f, "Unknown argument: {arg}"),
+            Self::MyIpError(ip_error) => ip_error.fmt(f),
             Self::LaneCount(lane_count_error) => lane_count_error.fmt(f),
             Self::PortStart(port_start_error) => port_start_error.fmt(f),
             Self::LocalTunnel(tunnel_spec_error) => tunnel_spec_error.fmt(f),
             Self::RemoteTunnel(tunnel_spec_error) => tunnel_spec_error.fmt(f),
         }
     }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum IpAddrErrorType {
+    UnexpectedEnd(String),
+    InvalidValue(String, String),
+}
+
+impl fmt::Display for IpAddrErrorType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnexpectedEnd(arg) => write!(f, "Expected IP address after {arg}"),
+            Self::InvalidValue(arg, arg2) => write!(f, "Invalid IP address after {arg}: {arg2}"),
+        }
+    }
+}
+
+fn parse_ip_addr_arg(arg: String, maybe_arg2: Option<String>) -> Result<IpAddr, IpAddrErrorType> {
+    let arg2 = match maybe_arg2 {
+        Some(arg2) => arg2,
+        None => return Err(IpAddrErrorType::UnexpectedEnd(arg)),
+    };
+
+    arg2.parse::<IpAddr>().map_err(|_| IpAddrErrorType::InvalidValue(arg, arg2))
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -344,12 +372,14 @@ where
             return Ok(ArgumentsRequest::Help);
         } else if arg.eq("-V") || arg.eq_ignore_ascii_case("--version") {
             return Ok(ArgumentsRequest::Version);
+        } else if arg.eq("--server") {
+            result.is_server = true;
+        } else if arg.eq("-a") || arg.eq_ignore_ascii_case("--my-ip") {
+            result.my_ip = Some(parse_ip_addr_arg(arg, args.next()).map_err(ArgumentsError::MyIpError)?);
         } else if arg.eq("-c") || arg.eq_ignore_ascii_case("--lane-count") {
             result.lane_count = parse_lane_count_arg(arg, args.next())?;
         } else if arg.eq("-p") || arg.eq_ignore_ascii_case("--port-start") {
             result.port_start = Some(parse_port_number_arg(arg, args.next()).map_err(ArgumentsError::PortStart)?);
-        } else if arg.eq("--server") {
-            result.is_server = true;
         } else if arg.starts_with("-L") {
             let spec_result = parse_tunnel_spec_arg(TunnelSide::Local, arg, 2, || args.next());
             result.tunnels.push(spec_result.map_err(ArgumentsError::LocalTunnel)?);

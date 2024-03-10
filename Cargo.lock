@@ -619,10 +619,6 @@ name = "stdin-tunnel"
 version = "0.1.0"
 dependencies = [
  "juan-puncher-sm",
- "quinn",
- "quinn-udp",
- "rcgen",
- "rustls",
  "tokio",
 ]
 

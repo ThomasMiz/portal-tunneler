@@ -106,6 +106,7 @@ pub async fn punch_connection(
     let socket_index = (ports.local.get() - port_start.get()) as usize;
     let socket = sockets.swap_remove(socket_index);
     drop(sockets);
+
     println!("Selected socket index {socket_index} addr {}", socket.local_addr().unwrap());
 
     let socket = SharedUdpSocket::new(socket).unwrap();

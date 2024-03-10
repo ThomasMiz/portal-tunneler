@@ -1,10 +1,10 @@
-use std::{sync::Arc, time::Duration};
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use quinn::{Connecting, Endpoint, EndpointConfig, IdleTimeout, RecvStream, SendStream, ServerConfig, TokioRuntime, VarInt};
 use tokio::{
     io::{stdin, stdout},
     join, select,
-    task::AbortHandle,
+    task::{AbortHandle, JoinHandle},
 };
 
 use crate::{shared_socket::SharedUdpSocket, KEEPALIVE_INTERVAL_PERIOD_MILLIS, MAX_IDLE_TIMEOUT_MILLIS};
@@ -32,18 +32,17 @@ fn make_server_endpoint(socket: SharedUdpSocket) -> (Endpoint, Vec<u8>) {
     (endpoint, server_cert)
 }
 
-pub async fn run_server(socket: SharedUdpSocket, mut abort_on_connect: Option<AbortHandle>) {
+pub async fn run_server(socket: SharedUdpSocket, abort_on_connect: Option<JoinHandle<()>>) {
     println!("Starting server on {}", socket.local_addr().unwrap());
     let (endpoint, _server_cert) = make_server_endpoint(socket);
 
     loop {
+        println!("Waiting for next incoming connection");
         let incoming_connection = select! {
             biased;
             v = endpoint.accept() => v,
             //_ = tokio::signal::ctrl_c() => break, // TODO: Find out why Ctrl-C hangs instead of closing
         };
-
-        abort_on_connect.take().inspect(|handle| handle.abort());
 
         let incoming_connection = match incoming_connection {
             Some(c) => c,
@@ -51,8 +50,9 @@ pub async fn run_server(socket: SharedUdpSocket, mut abort_on_connect: Option<Ab
         };
 
         println!("Incoming connection form addr={}", incoming_connection.remote_address());
+        let hhh = abort_on_connect.as_ref().map(|h| h.abort_handle());
         tokio::task::spawn_local(async move {
-            handle_connection(incoming_connection).await;
+            handle_connection(incoming_connection, hhh).await;
         });
     }
 
@@ -60,7 +60,7 @@ pub async fn run_server(socket: SharedUdpSocket, mut abort_on_connect: Option<Ab
     println!("Server closed");
 }
 
-async fn handle_connection(incoming_connection: Connecting) {
+async fn handle_connection(incoming_connection: Connecting, abort_on_connect: Option<AbortHandle>) {
     let connection = match incoming_connection.await {
         Ok(c) => c,
         Err(connection_error) => {
@@ -68,6 +68,7 @@ async fn handle_connection(incoming_connection: Connecting) {
             return;
         }
     };
+    abort_on_connect.inspect(|h| h.abort());
 
     loop {
         let (send_stream, recv_stream) = match connection.accept_bi().await {
