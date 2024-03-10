@@ -30,11 +30,6 @@ mod server;
 mod shared_socket;
 mod utils;
 
-pub const PORT: u16 = 4949;
-
-pub const KEEPALIVE_INTERVAL_PERIOD_MILLIS: u64 = 1000;
-pub const MAX_IDLE_TIMEOUT_MILLIS: u32 = 4000;
-
 fn main() {
     let arguments = match args::parse_arguments(env::args()) {
         Err(err) => {
@@ -73,6 +68,16 @@ fn main() {
 }
 
 async fn async_main(startup_args: StartupArguments) -> Result<(), Error> {
+    println!("Startup arguments: {startup_args:?}");
+    Ok(())
+
+    // TODO: Add a way to detect client-server mismatch when holepunching (e.g. as otherwise the puncher hangs).
+    // This could be handled in the parameters, by focing you to specify --server or --client when hole punching,
+    // and SHOULD be handled when hole-punching by, for example, adding a "mode bit" to the packet's application
+    // data and raising an error if the bit is the same on both sides.
+    // TODO: Decide whether to do this with application data or to integrate it directly with the puncher.
+
+    /*
     let port_start = startup_args.port_start.map(|p| p.get()).unwrap_or(0);
     let lane_count = startup_args.lane_count;
 
@@ -151,4 +156,5 @@ async fn async_main(startup_args: StartupArguments) -> Result<(), Error> {
     }
 
     Ok(())
+    */
 }
