@@ -9,17 +9,22 @@ use std::{
 use args::{ArgumentsRequest, StartupArguments};
 
 use tokio::{
-    io::{stdin, AsyncBufReadExt, BufReader}, task::LocalSet
+    io::{stdin, AsyncBufReadExt, BufReader},
+    task::LocalSet,
 };
 
-use crate::puncher::{
-    connection_code::{ConnectionCode, CONNECTION_STRING_MAX_LENGTH_CHARS},
-    get_public_ip::get_public_ipv4,
-    socket_binder::bind_sockets,
+use crate::{
+    endpoint::make_endpoint,
+    puncher::{
+        connection_code::{ConnectionCode, CONNECTION_STRING_MAX_LENGTH_CHARS},
+        get_public_ip::get_public_ipv4,
+        socket_binder::bind_sockets,
+    },
 };
 
 mod args;
 mod client;
+mod endpoint;
 mod puncher;
 mod server;
 mod shared_socket;
@@ -131,10 +136,18 @@ async fn async_main(startup_args: StartupArguments) -> Result<(), Error> {
 
     println!("SOCKET BOUND AT {} REMOTE IS {remote_address}", socket.local_addr().unwrap());
 
+    let endpoint = make_endpoint(
+        endpoint::EndpointSocketSource::Shared(socket),
+        !startup_args.is_server,
+        startup_args.is_server,
+    )?;
+
     if startup_args.is_server {
-        server::run_server(socket, maybe_background_task).await;
+        println!("Starting server on {}", endpoint.local_addr().unwrap());
+        server::run_server(endpoint, maybe_background_task).await;
     } else {
-        client::run_client(socket, remote_address).await;
+        println!("Starting client on {}", endpoint.local_addr().unwrap());
+        client::run_client(endpoint, remote_address).await;
     }
 
     Ok(())

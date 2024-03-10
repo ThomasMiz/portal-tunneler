@@ -1,40 +1,12 @@
-use std::{net::SocketAddr, sync::Arc, time::Duration};
-
-use quinn::{Connecting, Endpoint, EndpointConfig, IdleTimeout, RecvStream, SendStream, ServerConfig, TokioRuntime, VarInt};
+use quinn::{Connecting, Endpoint, RecvStream, SendStream, VarInt};
 use tokio::{
     io::{stdin, stdout},
     join, select,
     task::{AbortHandle, JoinHandle},
 };
 
-use crate::{shared_socket::SharedUdpSocket, KEEPALIVE_INTERVAL_PERIOD_MILLIS, MAX_IDLE_TIMEOUT_MILLIS};
-
-fn configure_server() -> (ServerConfig, Vec<u8>) {
-    let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
-    let cert_der = cert.serialize_der().unwrap();
-    let priv_key = rustls::PrivateKey(cert.serialize_private_key_der());
-    let cert_chain = vec![rustls::Certificate(cert_der.clone())];
-
-    let mut server_config = ServerConfig::with_single_cert(cert_chain, priv_key).unwrap();
-    let transport_config = Arc::get_mut(&mut server_config.transport).unwrap();
-    transport_config.max_concurrent_uni_streams(0_u8.into());
-    transport_config.keep_alive_interval(Some(Duration::from_millis(KEEPALIVE_INTERVAL_PERIOD_MILLIS)));
-    transport_config.max_idle_timeout(Some(IdleTimeout::from(VarInt::from_u32(MAX_IDLE_TIMEOUT_MILLIS))));
-
-    (server_config, cert_der)
-}
-
-fn make_server_endpoint(socket: SharedUdpSocket) -> (Endpoint, Vec<u8>) {
-    let runtime = Arc::new(TokioRuntime);
-    let (server_config, server_cert) = configure_server();
-
-    let endpoint = Endpoint::new_with_abstract_socket(EndpointConfig::default(), Some(server_config), socket, runtime).unwrap();
-    (endpoint, server_cert)
-}
-
-pub async fn run_server(socket: SharedUdpSocket, abort_on_connect: Option<JoinHandle<()>>) {
-    println!("Starting server on {}", socket.local_addr().unwrap());
-    let (endpoint, _server_cert) = make_server_endpoint(socket);
+pub async fn run_server(endpoint: Endpoint, abort_on_connect: Option<JoinHandle<()>>) {
+    println!("Starting server on {}", endpoint.local_addr().unwrap());
 
     loop {
         println!("Waiting for next incoming connection");
