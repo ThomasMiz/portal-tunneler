@@ -4,14 +4,16 @@ use std::{
 };
 
 use super::{
-    parse_ip_addr_arg, parse_lane_count_arg, parse_port_number_arg, parse_tunnel_spec_arg, ArgumentsRequest, ConnectMethod,
-    IpAddrErrorType, LaneCountErrorType, PortErrorType, PunchConfig, StartClientConfig, StartServerConfig, StartupArguments, StartupMode,
-    TunnelSide, TunnelSpecErrorType, DEFAULT_PORT,
+    parse_ip_addr_arg, parse_lane_count_arg, parse_port_number_arg, parse_socket_arg, parse_tunnel_spec_arg, ArgumentsRequest,
+    ConnectMethod, IpAddrErrorType, LaneCountErrorType, PortErrorType, PunchConfig, SocketErrorType, StartClientConfig, StartServerConfig,
+    StartupArguments, StartupMode, TunnelSide, TunnelSpecErrorType, DEFAULT_PORT,
 };
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum ArgumentsError {
     UnknownArgument(String),
+    ConnectError(SocketErrorType),
+    ListenError(SocketErrorType),
     MyIpError(IpAddrErrorType),
     LaneCount(LaneCountErrorType),
     PortStart(PortErrorType),
@@ -30,6 +32,8 @@ impl fmt::Display for ArgumentsError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::UnknownArgument(arg) => write!(f, "Unknown argument: {arg}"),
+            Self::ConnectError(socket_error) => socket_error.fmt(f),
+            Self::ListenError(socket_error) => socket_error.fmt(f),
             Self::MyIpError(ip_error) => ip_error.fmt(f),
             Self::LaneCount(lane_count_error) => lane_count_error.fmt(f),
             Self::PortStart(port_start_error) => port_start_error.fmt(f),
@@ -70,6 +74,28 @@ impl StartupArgumentsParser {
             silent: false,
             connect_method: None,
             startup_mode: None,
+        }
+    }
+
+    fn ensure_startup_mode_client(&mut self, arg: String) -> Result<String, ArgumentsError> {
+        match &mut self.startup_mode {
+            None => {
+                self.startup_mode = Some(StartupMode::Client(StartClientConfig::new()));
+                Ok(arg)
+            }
+            Some(StartupMode::Client(_)) => Ok(arg),
+            Some(StartupMode::Server(_)) => Err(ArgumentsError::ServerFoundClientArgument(arg)),
+        }
+    }
+
+    fn ensure_startup_mode_server(&mut self, arg: String) -> Result<String, ArgumentsError> {
+        match &mut self.startup_mode {
+            None => {
+                self.startup_mode = Some(StartupMode::Server(StartServerConfig::new()));
+                Ok(arg)
+            }
+            Some(StartupMode::Server(_)) => Ok(arg),
+            Some(StartupMode::Client(_)) => Err(ArgumentsError::ClientFoundServerArgument(arg)),
         }
     }
 
@@ -125,7 +151,7 @@ impl StartupArgumentsParser {
         Ok(())
     }
 
-    fn modify_startup_mode_server<F>(&mut self, arg: String, f: F) -> Result<(), ArgumentsError>
+    /*fn modify_startup_mode_server<F>(&mut self, arg: String, f: F) -> Result<(), ArgumentsError>
     where
         F: FnOnce(String, &mut StartServerConfig) -> Result<(), ArgumentsError>,
     {
@@ -140,7 +166,7 @@ impl StartupArgumentsParser {
         }
 
         Ok(())
-    }
+    }*/
 
     fn complete(self) -> Result<StartupArguments, ArgumentsError> {
         let startup_mode = self.startup_mode.unwrap_or_else(|| StartupMode::Server(StartServerConfig::new()));
@@ -167,6 +193,158 @@ impl StartupArgumentsParser {
     }
 }
 
+fn try_parse_general_argument(result: &mut StartupArgumentsParser, maybe_arg: &mut Option<String>) -> Result<bool, ArgumentsError> {
+    let arg = match maybe_arg.take() {
+        Some(s) => s,
+        None => return Ok(false),
+    };
+
+    if arg.eq("-v") || arg.eq_ignore_ascii_case("--verbose") {
+        result.verbose = true;
+    } else if arg.eq("-s") || arg.eq_ignore_ascii_case("--silent") {
+        result.silent = true;
+    } else {
+        *maybe_arg = Some(arg);
+    }
+
+    Ok(maybe_arg.is_none())
+}
+
+fn try_parse_client_argument<F>(
+    result: &mut StartupArgumentsParser,
+    maybe_arg: &mut Option<String>,
+    get_next_arg: F,
+) -> Result<bool, ArgumentsError>
+where
+    F: FnOnce() -> Option<String>,
+{
+    let arg = match maybe_arg.take() {
+        Some(s) => s,
+        None => return Ok(false),
+    };
+
+    if arg.eq("--client") {
+        result.ensure_startup_mode_client(arg)?;
+    } else if arg.eq("--connect") {
+        let arg = result.ensure_startup_mode_client(arg)?;
+        result.modify_connect_method_direct(arg, |arg, sockets| {
+            parse_socket_arg(sockets, arg, get_next_arg(), DEFAULT_PORT).map_err(ArgumentsError::ConnectError)
+        })?;
+    } else {
+        *maybe_arg = Some(arg);
+    }
+
+    Ok(maybe_arg.is_none())
+}
+
+fn try_parse_server_argument<F>(
+    result: &mut StartupArgumentsParser,
+    maybe_arg: &mut Option<String>,
+    get_next_arg: F,
+) -> Result<bool, ArgumentsError>
+where
+    F: FnOnce() -> Option<String>,
+{
+    let arg = match maybe_arg.take() {
+        Some(s) => s,
+        None => return Ok(false),
+    };
+
+    if arg.eq("--server") {
+        result.ensure_startup_mode_server(arg)?;
+    } else if arg.eq("--listen") {
+        let arg = result.ensure_startup_mode_server(arg)?;
+        result.modify_connect_method_direct(arg, |arg, sockets| {
+            parse_socket_arg(sockets, arg, get_next_arg(), DEFAULT_PORT).map_err(ArgumentsError::ListenError)
+        })?;
+    } else {
+        *maybe_arg = Some(arg);
+    }
+
+    Ok(maybe_arg.is_none())
+}
+
+fn try_parse_punch_argument<F>(
+    result: &mut StartupArgumentsParser,
+    maybe_arg: &mut Option<String>,
+    get_next_arg: F,
+) -> Result<bool, ArgumentsError>
+where
+    F: FnOnce() -> Option<String>,
+{
+    let arg = match maybe_arg.take() {
+        Some(s) => s,
+        None => return Ok(false),
+    };
+
+    if arg.eq("--punch") {
+        result.modify_connect_method_punch(arg, |_, _| Ok(()))?;
+    } else if arg.eq_ignore_ascii_case("--my-ip") {
+        result.modify_connect_method_punch(arg, |arg, punch_config| {
+            punch_config.my_ip = Some(parse_ip_addr_arg(arg, get_next_arg()).map_err(ArgumentsError::MyIpError)?);
+            Ok(())
+        })?;
+    } else if arg.eq_ignore_ascii_case("--lane-count") {
+        result.modify_connect_method_punch(arg, |arg, punch_config| {
+            punch_config.lane_count = parse_lane_count_arg(arg, get_next_arg())?;
+            Ok(())
+        })?;
+    } else if arg.eq_ignore_ascii_case("--port-start") {
+        result.modify_connect_method_punch(arg, |arg, punch_config| {
+            punch_config.port_start = Some(parse_port_number_arg(arg, get_next_arg()).map_err(ArgumentsError::PortStart)?);
+            Ok(())
+        })?;
+    } else {
+        *maybe_arg = Some(arg);
+    }
+
+    Ok(maybe_arg.is_none())
+}
+
+fn try_parse_tunnel_argument<F>(
+    result: &mut StartupArgumentsParser,
+    maybe_arg: &mut Option<String>,
+    get_next_arg: F,
+) -> Result<bool, ArgumentsError>
+where
+    F: FnOnce() -> Option<String>,
+{
+    let arg = match maybe_arg.take() {
+        Some(s) => s,
+        None => return Ok(false),
+    };
+
+    if arg.starts_with("-L") {
+        result.modify_startup_mode_client(arg, true, |arg, client_config| {
+            let spec_result = parse_tunnel_spec_arg(TunnelSide::Local, arg, 2, get_next_arg);
+            client_config.tunnels.push(spec_result.map_err(ArgumentsError::LocalTunnel)?);
+            Ok(())
+        })?;
+    } else if arg.eq("--local-tunnel") {
+        result.modify_startup_mode_client(arg, true, |arg, client_config| {
+            let spec_result = parse_tunnel_spec_arg(TunnelSide::Local, arg, 14, get_next_arg);
+            client_config.tunnels.push(spec_result.map_err(ArgumentsError::LocalTunnel)?);
+            Ok(())
+        })?;
+    } else if arg.starts_with("-R") {
+        result.modify_startup_mode_client(arg, true, |arg, client_config| {
+            let spec_result = parse_tunnel_spec_arg(TunnelSide::Remote, arg, 2, get_next_arg);
+            client_config.tunnels.push(spec_result.map_err(ArgumentsError::RemoteTunnel)?);
+            Ok(())
+        })?;
+    } else if arg.eq("--remote-tunnel") {
+        result.modify_startup_mode_client(arg, true, |arg, client_config| {
+            let spec_result = parse_tunnel_spec_arg(TunnelSide::Remote, arg, 15, get_next_arg);
+            client_config.tunnels.push(spec_result.map_err(ArgumentsError::RemoteTunnel)?);
+            Ok(())
+        })?;
+    } else {
+        *maybe_arg = Some(arg);
+    }
+
+    Ok(maybe_arg.is_none())
+}
+
 pub fn parse_arguments<T>(mut args: T) -> Result<ArgumentsRequest, ArgumentsError>
 where
     T: Iterator<Item = String>,
@@ -183,56 +361,16 @@ where
             return Ok(ArgumentsRequest::Help);
         } else if arg.eq("-V") || arg.eq_ignore_ascii_case("--version") {
             return Ok(ArgumentsRequest::Version);
-        } else if arg.eq("-v") || arg.eq_ignore_ascii_case("--verbose") {
-            result.verbose = true;
-        } else if arg.eq("-s") || arg.eq_ignore_ascii_case("--silent") {
-            result.silent = true;
-        } else if arg.eq("--server") {
-            result.modify_startup_mode_server(arg, |_, _| Ok(()))?;
-        } else if arg.eq("--client") {
-            result.modify_startup_mode_client(arg, false, |_, _| Ok(()))?;
-        } else if arg.eq("--punch") {
-            result.modify_connect_method_punch(arg, |_, _| Ok(()))?;
-        } else if arg.eq_ignore_ascii_case("--my-ip") {
-            result.modify_connect_method_punch(arg, |arg, punch_config| {
-                punch_config.my_ip = Some(parse_ip_addr_arg(arg, args.next()).map_err(ArgumentsError::MyIpError)?);
-                Ok(())
-            })?;
-        } else if arg.eq_ignore_ascii_case("--lane-count") {
-            result.modify_connect_method_punch(arg, |arg, punch_config| {
-                punch_config.lane_count = parse_lane_count_arg(arg, args.next())?;
-                Ok(())
-            })?;
-        } else if arg.eq_ignore_ascii_case("--port-start") {
-            result.modify_connect_method_punch(arg, |arg, punch_config| {
-                punch_config.port_start = Some(parse_port_number_arg(arg, args.next()).map_err(ArgumentsError::PortStart)?);
-                Ok(())
-            })?;
-        } else if arg.starts_with("-L") {
-            result.modify_startup_mode_client(arg, true, |arg, client_config| {
-                let spec_result = parse_tunnel_spec_arg(TunnelSide::Local, arg, 2, || args.next());
-                client_config.tunnels.push(spec_result.map_err(ArgumentsError::LocalTunnel)?);
-                Ok(())
-            })?;
-        } else if arg.eq("--local-tunnel") {
-            result.modify_startup_mode_client(arg, true, |arg, client_config| {
-                let spec_result = parse_tunnel_spec_arg(TunnelSide::Local, arg, 14, || args.next());
-                client_config.tunnels.push(spec_result.map_err(ArgumentsError::LocalTunnel)?);
-                Ok(())
-            })?;
-        } else if arg.starts_with("-R") {
-            result.modify_startup_mode_client(arg, true, |arg, client_config| {
-                let spec_result = parse_tunnel_spec_arg(TunnelSide::Remote, arg, 2, || args.next());
-                client_config.tunnels.push(spec_result.map_err(ArgumentsError::RemoteTunnel)?);
-                Ok(())
-            })?;
-        } else if arg.eq("--remote-tunnel") {
-            result.modify_startup_mode_client(arg, true, |arg, client_config| {
-                let spec_result = parse_tunnel_spec_arg(TunnelSide::Remote, arg, 15, || args.next());
-                client_config.tunnels.push(spec_result.map_err(ArgumentsError::RemoteTunnel)?);
-                Ok(())
-            })?;
-        } else {
+        }
+
+        let mut maybe_arg = Some(arg);
+        let _ = !try_parse_general_argument(&mut result, &mut maybe_arg)?
+            && !try_parse_client_argument(&mut result, &mut maybe_arg, || args.next())?
+            && !try_parse_server_argument(&mut result, &mut maybe_arg, || args.next())?
+            && !try_parse_punch_argument(&mut result, &mut maybe_arg, || args.next())?
+            && !try_parse_tunnel_argument(&mut result, &mut maybe_arg, || args.next())?;
+
+        if let Some(arg) = maybe_arg {
             return Err(ArgumentsError::UnknownArgument(arg));
         }
     }

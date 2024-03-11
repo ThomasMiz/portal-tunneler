@@ -30,6 +30,7 @@ impl From<LaneCountErrorType> for ArgumentsError {
     }
 }
 
+/// Parses a lane count (from hole punching) argument.
 pub(super) fn parse_lane_count_arg(arg: String, maybe_arg2: Option<String>) -> Result<NonZeroU16, LaneCountErrorType> {
     let arg2 = match maybe_arg2 {
         Some(arg2) => arg2,
@@ -62,6 +63,7 @@ impl fmt::Display for PortErrorType {
     }
 }
 
+/// Parses a port number argument. Port 0 is not allowed.
 pub(super) fn parse_port_number_arg(arg: String, maybe_arg2: Option<String>) -> Result<NonZeroU16, PortErrorType> {
     let arg2 = match maybe_arg2 {
         Some(arg2) => arg2,

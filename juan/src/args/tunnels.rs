@@ -70,6 +70,12 @@ impl fmt::Display for TunnelSpecErrorType {
     }
 }
 
+/// Parses a port number at the end of the string, walking down up to a colon ':' or the start of
+/// the string.
+///
+/// Returns an error if the port is invalid, otherwise returns ownership of `arg` and `spec`, as
+/// well as specifying whether a colon index was found, by returning a tuple with
+/// `(arg, spec, maybe_colon_index, port)`.
 fn parse_port_backwards(
     arg: String,
     spec: String,
@@ -88,6 +94,12 @@ fn parse_port_backwards(
     }
 }
 
+/// Parses an address at the end of the string, walking down up to a colon ':' or the start of the
+/// string.
+///
+/// Returns an error if the address is invalid, otherwise returns ownership of `arg` and `spec`,
+/// as well as specifying whether a colon index was found, by returning a tuple with
+/// `(arg, spec, maybe_colon_index, address)`.
 fn parse_address_backwards(
     arg: String,
     spec: String,
@@ -139,6 +151,9 @@ fn parse_address_backwards(
     Ok((arg, spec, maybe_colon_index, address))
 }
 
+/// Parses a tunnel specification argument in an SSH-like format. The specification may be fully
+/// within the first argument (e.g. "-L8080:localhost:8080") or as a separate argument (e.g.
+/// "-L 8080:localhost:8080"). The second argument is only consumed if necessary.
 pub(super) fn parse_tunnel_spec_arg<F>(
     side: TunnelSide,
     mut arg: String,

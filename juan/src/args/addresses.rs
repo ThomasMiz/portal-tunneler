@@ -19,6 +19,8 @@ impl fmt::Display for SocketErrorType {
     }
 }
 
+/// Parses a socket address argument, doing domain name resolution if necessary. The resulting
+/// [`SocketAddr`] instances are pushed onto a `result_vec` vector.
 pub(super) fn parse_socket_arg(
     result_vec: &mut Vec<SocketAddr>,
     arg: String,
@@ -63,6 +65,8 @@ impl fmt::Display for IpAddrErrorType {
     }
 }
 
+/// Parses an IP address argument. Domain names are not accepted by this function, as it is
+/// intended to be used in places where only a single IP address is allowed.
 pub(super) fn parse_ip_addr_arg(arg: String, maybe_arg2: Option<String>) -> Result<IpAddr, IpAddrErrorType> {
     let arg2 = match maybe_arg2 {
         Some(arg2) => arg2,
