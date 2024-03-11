@@ -5,7 +5,7 @@ use std::{
     time::Duration,
 };
 
-use juan_puncher_sm as sm;
+use portal_puncher_sm as sm;
 
 use tokio::{net::UdpSocket, select, task::JoinHandle};
 

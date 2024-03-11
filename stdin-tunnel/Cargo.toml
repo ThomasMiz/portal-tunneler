@@ -5,4 +5,4 @@ edition = "2021"
 
 [dependencies]
 tokio = { version = "1.36.0", features = ["full"] }
-juan-puncher-sm = { path = "../juan-puncher-sm", version = "0.1.0" }
+portal-puncher-sm = { path = "../portal-puncher-sm", version = "0.1.0" }

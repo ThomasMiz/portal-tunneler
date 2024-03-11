@@ -1,4 +1,4 @@
-//! Format of a juan-puncher UDP packet:
+//! Format of a portal-puncher UDP packet:
 //! +----------+-------------+------------------+
 //! | PREAMBLE | LANE_STATUS | APPLICATION_DATA |
 //! +----------+-------------+------------------+

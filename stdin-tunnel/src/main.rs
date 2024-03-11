@@ -15,7 +15,7 @@ mod utils;
 fn main() {
     let arguments = match args::parse_arguments(env::args()) {
         Err(err) => {
-            eprintln!("{err}\n\nType 'juan --help' for a help menu");
+            eprintln!("{err}\n\nType 'stdin-tunnel --help' for a help menu");
             exit(1);
         }
         Ok(arguments) => arguments,

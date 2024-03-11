@@ -33,7 +33,7 @@ mod utils;
 fn main() {
     let arguments = match args::parse_arguments(env::args()) {
         Err(err) => {
-            eprintln!("{err}\n\nType 'juan --help' for a help menu");
+            eprintln!("{err}\n\nType 'portal --help' for a help menu");
             exit(1);
         }
         Ok(arguments) => arguments,
@@ -42,7 +42,7 @@ fn main() {
     let startup_args = match arguments {
         ArgumentsRequest::Version => {
             println!("{}", args::get_version_string());
-            println!("Do NOT ask who Juan is.");
+            println!("// TODO: Write a funny message");
             return;
         }
         ArgumentsRequest::Help => {
