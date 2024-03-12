@@ -21,10 +21,10 @@ pub async fn run_server(endpoint: Endpoint, abort_on_connect: Option<JoinHandle<
             None => break,
         };
 
+        let abort_on_connect = abort_on_connect.as_ref().map(|h| h.abort_handle());
         println!("Incoming connection form addr={}", incoming_connection.remote_address());
-        let hhh = abort_on_connect.as_ref().map(|h| h.abort_handle());
         tokio::task::spawn_local(async move {
-            handle_connection(incoming_connection, hhh).await;
+            handle_connection(incoming_connection, abort_on_connect).await;
         });
     }
 

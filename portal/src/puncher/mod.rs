@@ -18,13 +18,18 @@ pub mod connection_code;
 pub mod get_public_ip;
 pub mod socket_binder;
 
+pub enum PunchConnectResult {
+    Connect(UdpSocket, SocketAddr),
+    Listen(SharedUdpSocket, SocketAddr, JoinHandle<()>),
+}
+
 pub async fn punch_connection(
     is_server: bool,
     mut sockets: Vec<UdpSocket>,
     remote_address: IpAddr,
     remote_port_start: NonZeroU16,
     lane_count: NonZeroU16,
-) -> Result<(SharedUdpSocket, Option<JoinHandle<()>>, SocketAddr), Error> {
+) -> Result<PunchConnectResult, Error> {
     let port_start = NonZeroU16::new(sockets[0].local_addr().unwrap().port()).unwrap();
 
     let mut puncher = sm::Puncher::new(
@@ -109,18 +114,21 @@ pub async fn punch_connection(
 
     println!("Selected socket index {socket_index} addr {}", socket.local_addr().unwrap());
 
-    let socket = SharedUdpSocket::new(socket).unwrap();
-    let socket2 = SharedUdpSocket::clone(&socket);
+    let remote_address = SocketAddr::new(remote_address, ports.remote.get());
+    let result = match is_server {
+        true => {
+            let socket = SharedUdpSocket::new(socket).unwrap();
+            let socket2 = SharedUdpSocket::clone(&socket);
+            let handle = tokio::task::spawn_local(async move {
+                server_background_task(socket2, puncher, packet_counter).await;
+            });
 
-    let handle = match is_server {
-        false => None,
-        true => Some(tokio::task::spawn_local(async move {
-            server_background_task(socket2, puncher, packet_counter).await;
-        })),
+            PunchConnectResult::Listen(socket, remote_address, handle)
+        }
+        false => PunchConnectResult::Connect(socket, remote_address),
     };
 
-    let remote_address = SocketAddr::new(remote_address, ports.remote.get());
-    Ok((socket, handle, remote_address))
+    Ok(result)
 }
 
 async fn server_background_task(socket: SharedUdpSocket, mut puncher: sm::Puncher, mut packet_counter: u32) {

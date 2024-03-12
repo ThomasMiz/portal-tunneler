@@ -1,29 +1,24 @@
 use std::{
     env,
-    io::{Error, ErrorKind, Write},
-    net::{IpAddr, Ipv4Addr, SocketAddr},
-    num::NonZeroU16,
+    future::{poll_fn, Future},
+    io::Error,
+    pin::Pin,
     process::exit,
+    task::Poll,
 };
 
 use args::{ArgumentsRequest, StartupArguments};
 
-use tokio::{
-    io::{stdin, AsyncBufReadExt, BufReader},
-    task::LocalSet,
-};
+use tokio::task::LocalSet;
 
 use crate::{
-    endpoint::make_endpoint,
-    puncher::{
-        connection_code::{ConnectionCode, CONNECTION_STRING_MAX_LENGTH_CHARS},
-        get_public_ip::get_public_ipv4,
-        socket_binder::bind_sockets,
-    },
+    args::StartupMode,
+    connect::{connect_client, connect_server},
 };
 
 mod args;
 mod client;
+mod connect;
 mod endpoint;
 mod puncher;
 mod server;
@@ -69,6 +64,45 @@ fn main() {
 
 async fn async_main(startup_args: StartupArguments) -> Result<(), Error> {
     println!("Startup arguments: {startup_args:?}");
+
+    match startup_args.startup_mode {
+        StartupMode::Client(client_config) => {
+            let (endpoint, connection) = connect_client(client_config, startup_args.connect_method).await?;
+            client::run_client(connection).await;
+            endpoint.wait_idle().await;
+        }
+        StartupMode::Server(server_config) => {
+            let (endpoints, mut maybe_handle) = connect_server(server_config, startup_args.connect_method).await?;
+            let mut handles = Vec::with_capacity(endpoints.len());
+            for endpoint in endpoints {
+                let maybe_handle = maybe_handle.take();
+                let handle = tokio::task::spawn_local(async move {
+                    server::run_server(endpoint, maybe_handle).await;
+                });
+
+                handles.push(handle);
+            }
+
+            poll_fn(move |cx| {
+                let mut i = 0;
+                while i < handles.len() {
+                    match Pin::new(&mut handles[i]).poll(cx) {
+                        Poll::Ready(_) => {
+                            handles.swap_remove(i);
+                        }
+                        Poll::Pending => i += 1,
+                    }
+                }
+
+                match handles.is_empty() {
+                    true => Poll::Ready(()),
+                    false => Poll::Pending,
+                }
+            })
+            .await;
+        }
+    }
+
     Ok(())
 
     // TODO: Add a way to detect client-server mismatch when holepunching (e.g. as otherwise the puncher hangs).
@@ -76,85 +110,4 @@ async fn async_main(startup_args: StartupArguments) -> Result<(), Error> {
     // and SHOULD be handled when hole-punching by, for example, adding a "mode bit" to the packet's application
     // data and raising an error if the bit is the same on both sides.
     // TODO: Decide whether to do this with application data or to integrate it directly with the puncher.
-
-    /*
-    let port_start = startup_args.port_start.map(|p| p.get()).unwrap_or(0);
-    let lane_count = startup_args.lane_count;
-
-    print!("Binding sockets...");
-    std::io::stdout().flush()?;
-    let sockets = bind_sockets(SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port_start), lane_count)?;
-    let port_start = sockets[0].local_addr().unwrap().port();
-
-    if sockets.len() == 1 {
-        println!(" Done, bound a single socket at {}", sockets.first().unwrap().local_addr().unwrap());
-    } else {
-        let first_addr = sockets.first().unwrap().local_addr().unwrap();
-        let last_addr = sockets.last().unwrap().local_addr().unwrap();
-        println!(" Done, bound {} sockets from {} to {}", sockets.len(), first_addr, last_addr);
-    }
-
-    print!("Finding your public IP address...");
-    std::io::stdout().flush()?;
-    let public_ip = match startup_args.my_ip {
-        Some(ip) => match ip {
-            IpAddr::V4(ipv4) => ipv4,
-            IpAddr::V6(_) => panic!("Support for IPv6 is not implemented yet"),
-        },
-        None => get_public_ipv4().await?,
-    };
-    println!(" {public_ip}");
-
-    let connection_code = ConnectionCode::new(IpAddr::V4(public_ip), port_start, lane_count);
-    println!("Your connection code is: {}", connection_code.serialize_to_string());
-
-    print!("Enter your friend's connection code: ");
-    std::io::stdout().flush()?;
-    let mut s = String::with_capacity(CONNECTION_STRING_MAX_LENGTH_CHARS + 2);
-    let mut stdin = BufReader::with_capacity(1024, stdin());
-    stdin.read_line(&mut s).await?;
-    let destination_code = ConnectionCode::deserialize_from_str(s.trim()).map_err(|e| {
-        let message = format!("Invalid error code: {e:?}");
-        Error::new(ErrorKind::InvalidData, message)
-    })?;
-
-    if connection_code.lane_count != destination_code.lane_count {
-        println!("Warning! The lane counts on the connection codes don't match. The minimum will be used.");
-        println!(
-            "Local lane count: {}, Remote lane count: {}",
-            connection_code.lane_count, destination_code.lane_count
-        );
-    }
-
-    let remote_port_start = NonZeroU16::new(destination_code.port_start).unwrap();
-    let lane_count = connection_code.lane_count.min(destination_code.lane_count);
-
-    println!("Punching!");
-    let (socket, maybe_background_task, remote_address) = puncher::punch_connection(
-        startup_args.is_server,
-        sockets,
-        destination_code.address,
-        remote_port_start,
-        lane_count,
-    )
-    .await?;
-
-    println!("SOCKET BOUND AT {} REMOTE IS {remote_address}", socket.local_addr().unwrap());
-
-    let endpoint = make_endpoint(
-        endpoint::EndpointSocketSource::Shared(socket),
-        !startup_args.is_server,
-        startup_args.is_server,
-    )?;
-
-    if startup_args.is_server {
-        println!("Starting server on {}", endpoint.local_addr().unwrap());
-        server::run_server(endpoint, maybe_background_task).await;
-    } else {
-        println!("Starting client on {}", endpoint.local_addr().unwrap());
-        client::run_client(endpoint, remote_address).await;
-    }
-
-    Ok(())
-    */
 }
