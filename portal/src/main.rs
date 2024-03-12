@@ -67,12 +67,12 @@ async fn async_main(startup_args: StartupArguments) -> Result<(), Error> {
 
     match startup_args.startup_mode {
         StartupMode::Client(client_config) => {
-            let (endpoint, connection) = connect_client(client_config, startup_args.connect_method).await?;
+            let (endpoint, connection) = connect_client(startup_args.connect_method).await?;
             client::run_client(connection).await;
             endpoint.wait_idle().await;
         }
         StartupMode::Server(server_config) => {
-            let (endpoints, mut maybe_handle) = connect_server(server_config, startup_args.connect_method).await?;
+            let (endpoints, mut maybe_handle) = connect_server(startup_args.connect_method).await?;
             let mut handles = Vec::with_capacity(endpoints.len());
             for endpoint in endpoints {
                 let maybe_handle = maybe_handle.take();
@@ -104,10 +104,4 @@ async fn async_main(startup_args: StartupArguments) -> Result<(), Error> {
     }
 
     Ok(())
-
-    // TODO: Add a way to detect client-server mismatch when holepunching (e.g. as otherwise the puncher hangs).
-    // This could be handled in the parameters, by focing you to specify --server or --client when hole punching,
-    // and SHOULD be handled when hole-punching by, for example, adding a "mode bit" to the packet's application
-    // data and raising an error if the bit is the same on both sides.
-    // TODO: Decide whether to do this with application data or to integrate it directly with the puncher.
 }

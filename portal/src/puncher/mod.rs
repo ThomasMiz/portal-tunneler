@@ -105,6 +105,12 @@ pub async fn punch_connection(
             sm::PuncherAction::Timeout => {
                 return Err(Error::new(ErrorKind::Other, "Failed to establish a connection before the timeout"));
             }
+            sm::PuncherAction::ClientServerMismatch => {
+                return Err(Error::new(
+                    ErrorKind::Other,
+                    "Client-server mismatch. Make sure one host is server and the other is client",
+                ));
+            }
         }
     };
 

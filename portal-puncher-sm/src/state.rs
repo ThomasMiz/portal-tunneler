@@ -8,29 +8,29 @@ use crate::packet::PacketDataError;
 pub(crate) enum LaneStatus {
     /// The lane is attempting to connect, but hasn’t heard back from the remote peer.
     #[default]
-    Connecting = 1,
+    Connecting = 0,
 
     /// The lane has heard heard back from the remote peer (and thus its outgoing packets are now
     /// indicating to the remote host that _"I can hear you in here!"_)
-    Establishing = 2,
+    Establishing = 1,
 
     /// The lane has heard an `Establishing` packet back from the remote peer. This means _"I can
     /// hear them, and they can hear me too"_. The connection is established and the lane has been
     /// selected as the link for the communication. Only one lane can be selected.
-    Selected = 3,
+    Selected = 2,
 
     /// The system detected interference, bad packets, or garbage data, and thus decided this lane
     /// is unsuitable for use.
-    Blocked = 255,
+    Blocked = 3,
 }
 
 impl LaneStatus {
     pub const fn from_u8(value: u8) -> Option<Self> {
         match value {
-            1 => Some(Self::Connecting),
-            2 => Some(Self::Establishing),
-            3 => Some(Self::Selected),
-            255 => Some(Self::Blocked),
+            0 => Some(Self::Connecting),
+            1 => Some(Self::Establishing),
+            2 => Some(Self::Selected),
+            3 => Some(Self::Blocked),
             _ => None,
         }
     }
@@ -156,6 +156,9 @@ pub enum BlockReason {
 
     /// A packet was received from a wrong source IP or port.
     Interference(SocketAddr),
+
+    /// The process was aborted locally.
+    Aborted,
 
     /// A packet with the `Blocked` status was received.
     BlockedByRemote,

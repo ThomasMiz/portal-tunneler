@@ -65,6 +65,9 @@ pub enum PuncherAction {
     /// All the lanes have been blocked.
     Failed,
 
+    /// This peer and the remote are either both set up as clients, or both set up as servers.
+    ClientServerMismatch,
+
     /// A link failed to be established and a lane to be selected before the timeout expired.
     ///
     /// Note: Once a link is established and a lane has been selected, the timeout is ignored. So
@@ -87,6 +90,7 @@ pub struct Puncher {
     open_lanes_count: u16,
     lanes: Vec<Lane>,
     is_server: bool,
+    client_server_mismatch: bool,
     selected_lane_index: Option<u16>,
     tick_period: Duration,
     next_tick_instant: Instant,
@@ -122,6 +126,7 @@ impl Puncher {
             open_lanes_count: lane_count.get(),
             lanes,
             is_server,
+            client_server_mismatch: false,
             selected_lane_index: None,
             tick_period,
             next_tick_instant: Instant::now().checked_add(tick_period).unwrap(),
@@ -239,6 +244,17 @@ impl Puncher {
             return Some(packet_data.application_data);
         }
 
+        if packet_data.is_server == self.is_server {
+            self.client_server_mismatch = true;
+            for i in 0..self.lane_count.get() {
+                if self.lanes[i as usize].state.is_active() {
+                    self.block_lane(i, BlockReason::Aborted);
+                }
+            }
+
+            return Some(packet_data.application_data);
+        }
+
         let has_selected = self.selected_lane_index.is_some();
         let result = lane.state.process_packet(self.is_server, has_selected, packet_data.lane_status);
 
@@ -271,7 +287,7 @@ impl Puncher {
             let lane = &mut self.lanes[lane_index];
             lane.state.process_sent();
 
-            let length = PacketData::new(lane.state.status(), application_data).write_to(buf);
+            let length = PacketData::new(lane.state.status(), self.is_server, application_data).write_to(buf);
 
             SendInfo {
                 from_port: self.my_port_start.saturating_add(lane_index as u16),
@@ -310,7 +326,10 @@ impl Puncher {
         }
 
         if self.open_lanes_count == 0 {
-            return PuncherAction::Failed;
+            return match self.client_server_mismatch {
+                true => PuncherAction::ClientServerMismatch,
+                false => PuncherAction::Failed,
+            };
         }
 
         if Instant::now() >= self.timeout_instant {

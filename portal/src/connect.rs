@@ -14,7 +14,7 @@ use tokio::{
 };
 
 use crate::{
-    args::{ConnectMethod, PunchConfig, StartClientConfig, StartServerConfig},
+    args::{ConnectMethod, PunchConfig},
     endpoint::{make_endpoint, EndpointSocketSource},
     puncher::{
         self,
@@ -81,7 +81,7 @@ pub async fn punch(punch_config: PunchConfig, is_server: bool) -> io::Result<Pun
     puncher::punch_connection(is_server, sockets, destination_code.address, remote_port_start, lane_count).await
 }
 
-pub async fn connect_client(_client_config: StartClientConfig, connect_method: ConnectMethod) -> io::Result<(Endpoint, Connection)> {
+pub async fn connect_client(connect_method: ConnectMethod) -> io::Result<(Endpoint, Connection)> {
     match connect_method {
         ConnectMethod::Punch(punch_config) => {
             let (socket, destination_address) = match punch(punch_config, false).await? {
@@ -193,10 +193,7 @@ pub async fn connect_client(_client_config: StartClientConfig, connect_method: C
     }
 }
 
-pub async fn connect_server(
-    _server_config: StartServerConfig,
-    connect_method: ConnectMethod,
-) -> io::Result<(Vec<Endpoint>, Option<JoinHandle<()>>)> {
+pub async fn connect_server(connect_method: ConnectMethod) -> io::Result<(Vec<Endpoint>, Option<JoinHandle<()>>)> {
     match connect_method {
         ConnectMethod::Punch(punch_config) => {
             let (socket, background_task_handle) = match punch(punch_config, true).await? {

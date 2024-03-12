@@ -1,9 +1,9 @@
 //! Format of a portal-puncher UDP packet:
-//! +----------+-------------+------------------+
-//! | PREAMBLE | LANE_STATUS | APPLICATION_DATA |
-//! +----------+-------------+------------------+
-//! |    8     |      1      |     VARIABLE     |
-//! +----------+-------------+------------------+
+//! +----------+------------------------------------------+------------------+
+//! | PREAMBLE | LANE_STATUS (7 bits) + IS_SERVER (1 bit) | APPLICATION_DATA |
+//! +----------+------------------------------------------+------------------+
+//! |    8     |                    1                     |     VARIABLE     |
+//! +----------+------------------------------------------+------------------+
 //!
 //! The `PREAMBLE` is an 8-byte sequence that's always expected to be the same. This allows quickly
 //! recognizing when a packet clearly is not in the right format.
@@ -50,6 +50,7 @@ pub const MAX_FRAGMENTATION_SAFE_APPLICATION_DATA: usize = MAX_FRAGMENTATION_SAF
 
 pub(crate) struct PacketData<'a> {
     pub lane_status: LaneStatus,
+    pub is_server: bool,
     pub application_data: &'a [u8],
 }
 
@@ -66,13 +67,14 @@ pub enum PacketDataError {
 }
 
 impl<'a> PacketData<'a> {
-    pub fn new(lane_status: LaneStatus, application_data: &'a [u8]) -> Self {
+    pub fn new(lane_status: LaneStatus, is_server: bool, application_data: &'a [u8]) -> Self {
         if application_data.len() > MAX_REASONABLE_APPLICATION_DATA {
             panic!("application_data is over the allowed size limit of {MAX_REASONABLE_APPLICATION_DATA}");
         }
 
         Self {
             lane_status,
+            is_server,
             application_data,
         }
     }
@@ -85,7 +87,8 @@ impl<'a> PacketData<'a> {
         buf[0..PREAMBLE_SIZE].copy_from_slice(&PREAMBLE);
         let mut index = PREAMBLE_SIZE;
 
-        buf[index] = self.lane_status.into_u8();
+        let status_byte = self.lane_status.into_u8() | ((self.is_server as u8) << 7);
+        buf[index] = status_byte;
         index += LANE_STATUS_SIZE;
 
         buf[index..(index + self.application_data.len())].copy_from_slice(self.application_data);
@@ -105,11 +108,14 @@ impl<'a> PacketData<'a> {
 
         let mut index = PREAMBLE_SIZE;
 
-        let lane_status = LaneStatus::from_u8(buf[index]).ok_or(PacketDataError::InvalidLaneStatus)?;
+        let status_byte = buf[index];
+        let lane_status = LaneStatus::from_u8(status_byte & 0b01111111).ok_or(PacketDataError::InvalidLaneStatus)?;
+        let is_server = (status_byte >> 7) != 0;
         index += 1;
 
         Ok(Self {
             lane_status,
+            is_server,
             application_data: &buf[index..],
         })
     }
