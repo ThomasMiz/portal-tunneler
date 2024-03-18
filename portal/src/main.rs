@@ -69,10 +69,13 @@ async fn async_main(startup_args: StartupArguments) -> Result<(), Error> {
     match startup_args.startup_mode {
         StartupMode::Client(client_config) => {
             let (endpoint, connection) = connect_client(startup_args.connect_method).await?;
-            client::run_client(connection).await;
+            match client::run_client(connection, client_config.tunnels).await {
+                Ok(()) => {}
+                Err(error) => eprintln!("Client finished with error: {error}"),
+            }
             endpoint.wait_idle().await;
         }
-        StartupMode::Server(server_config) => {
+        StartupMode::Server(_server_config) => {
             let (endpoints, mut maybe_handle) = connect_server(startup_args.connect_method).await?;
             let mut handles = Vec::with_capacity(endpoints.len());
             for endpoint in endpoints {

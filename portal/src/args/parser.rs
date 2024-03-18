@@ -316,25 +316,29 @@ where
 
     if arg.starts_with("-L") {
         result.modify_startup_mode_client(arg, true, |arg, client_config| {
-            let spec_result = parse_tunnel_spec_arg(TunnelSide::Local, arg, 2, get_next_arg);
+            let idx = client_config.tunnels.len();
+            let spec_result = parse_tunnel_spec_arg(TunnelSide::Local, arg, 2, idx, get_next_arg);
             client_config.tunnels.push(spec_result.map_err(ArgumentsError::LocalTunnel)?);
             Ok(())
         })?;
     } else if arg.eq("--local-tunnel") {
         result.modify_startup_mode_client(arg, true, |arg, client_config| {
-            let spec_result = parse_tunnel_spec_arg(TunnelSide::Local, arg, 14, get_next_arg);
+            let idx = client_config.tunnels.len();
+            let spec_result = parse_tunnel_spec_arg(TunnelSide::Local, arg, 14, idx, get_next_arg);
             client_config.tunnels.push(spec_result.map_err(ArgumentsError::LocalTunnel)?);
             Ok(())
         })?;
     } else if arg.starts_with("-R") {
         result.modify_startup_mode_client(arg, true, |arg, client_config| {
-            let spec_result = parse_tunnel_spec_arg(TunnelSide::Remote, arg, 2, get_next_arg);
+            let idx = client_config.tunnels.len();
+            let spec_result = parse_tunnel_spec_arg(TunnelSide::Remote, arg, 2, idx, get_next_arg);
             client_config.tunnels.push(spec_result.map_err(ArgumentsError::RemoteTunnel)?);
             Ok(())
         })?;
     } else if arg.eq("--remote-tunnel") {
         result.modify_startup_mode_client(arg, true, |arg, client_config| {
-            let spec_result = parse_tunnel_spec_arg(TunnelSide::Remote, arg, 15, get_next_arg);
+            let idx = client_config.tunnels.len();
+            let spec_result = parse_tunnel_spec_arg(TunnelSide::Remote, arg, 15, idx, get_next_arg);
             client_config.tunnels.push(spec_result.map_err(ArgumentsError::RemoteTunnel)?);
             Ok(())
         })?;

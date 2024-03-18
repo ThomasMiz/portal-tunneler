@@ -17,36 +17,47 @@
 //! remote tunnels may be opened at any time.
 //!
 //! In both cases, the client opens the stream and is the first to talk. The way to distinguish
-//! between what the stream is for is with the highest bit of the first byte sent. If this bit is
-//! 0, this stream is for a local tunnel. If the bit is 1, the stream is for requesting the server
-//! starts a remote tunnel. This bit should then be set to 0 and proceed with one of the two
-//! procedures describe in the following sub-sections.
+//! between what the stream is for is with the first byte sent. If this byte is 0, this stream is
+//! for a new connection on a local tunnel. If the byte is 1, the stream is for requesting the
+//! server starts a remote tunnel (see: [`ClientStreamRequest`](types::ClientStreamRequest)).
 //!
 //! ## Streams for a local tunnel
 //! The client first sends an [`AddressOrDomainname`](types::AddressOrDomainname) indicating the
 //! destination (the reason why a domainname can be specified is because we want the server to do
-//! the DNS query). The server then responds with either the address of the newly bound socket, or
-//! the error that occurred: `Result<SocketAddr, (StartConnectionError, Error)>`. If the server
-//! responds with an error, it must then close the stream. Otherwise, the connection has been
-//! established and both the server an the client can start copying user data bidirectionally. If
-//! either side sees the connection closed, it must close the stream.
+//! the DNS query). The server then attempts the connection and responds with either the address of
+//! the newly bound socket, or the error that occurred:
+//! `Result<SocketAddr, (StartConnectionError, Error)>`. If the server responds with an error, it
+//! must then close the stream. Otherwise, the connection has been established and both the server
+//! an the client can start copying user data bidirectionally. If either side sees the connection
+//! closed, it must close the stream. Note that if the tunnel's target is dynamic (e.g. SOCKS) then
+//! the server does not see that, as that's handled by the client.
 //!
 //! ## Streams for requesting starting a remote tunnel
-//! The client first sends an [`AddressOrDomainname`](types::AddressOrDomainname) indicating the
-//! address of the socket to listen for incoming connections at, followed by an `u32`, the ID of
-//! the tunnel. The server then responds with either an error (if the socket couldn't be bound) or
-//! an Ok(): `Result<(), Error>`. The client may send one or multiple of these requests in a
-//! pipelined fashion, and then must close its sending end of the stream. The server must finish
-//! answering all requests, responding them in the same order as sent, and then close the stream.
+//! The client first sends the ID of the tunnel, an `u32`, followed by the target type of the
+//! tunnel (whether it's static or SOCKS), an [`TunnelTargetType`](types::TunnelTargetType), and
+//! finally the address of the socket to listen for incoming connections at, an
+//! [`AddressOrDomainname`](types::AddressOrDomainname). All these are encompassed by the type
+//! [`OpenRemoteTunnelRequest`](types::OpenRemoteTunnelRequest). The server then responds with
+//! either an error (if the socket couldn't be bound) or an Ok(): `Result<(), Error>`. The client
+//! may send one or multiple of these requests in a pipelined fashion, and then must close its
+//! sending end of the stream. The server must finish answering all requests, responding them in
+//! the same order as sent, and then close the stream.
 //!
 //! # Server-opened bidirectional streams
 //! Server-opened streams are exclusively used for new connections in a remote tunnel. The server
-//! starts by sending an `u32`, the ID of the tunnel. The client then responds with a single `bool`
-//! indicating whether the connection is established. If false, the client must then close the
-//! stream. Otherwise, the connection has been established and the server can start copying user
-//! data bidirectionally. The server does not know where the tunnel goes, or even if it is a
-//! dynamic SOCKS tunnel. All of that is handled by the client.
+//! starts by sending an `u32`, the ID of the tunnel, followed by the optional target, an
+//! `Option<AddressOrDomainname>`, which should be `None` if the tunnel target type is static or
+//! `Some` otherwise (the server knows the target type, as that was specified by the client when
+//! it requested opening the tunnel). The client then attempts the connection and responds with
+//! either the address of the newly bound socket, or the error that occurred:
+//! `Result<SocketAddr, (StartConnectionError, Error)>`. If the client responds with an error, it
+//! must then close the stream. Otherwise, the connection has been established and both the server
+//! and the client can start copying user data bidirectionally. If either side sees the connection
+//! closed, it must close the stream. Note that if the tunnel's target is dynamic (e.g. SOCKS) then
+//! the dynamic protocol is in this case handled by the server.
 
+// TODO: Protocol version cannot be negotiated during hole punching, because we might not be doing
+// hole punching (oops). Change this.
 /// The version of the protocol. This is negotiated during hole punching through the application
 /// data. Each peer will see the other's protocol version, so the minimum between the two will be
 /// used.
@@ -56,5 +67,5 @@ pub const PROTOCOL_VERSION: u16 = 1;
 
 pub mod types;
 
-mod serialize;
-mod u8_repr_enum;
+pub mod serialize;
+pub mod u8_repr_enum;

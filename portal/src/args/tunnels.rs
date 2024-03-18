@@ -4,11 +4,15 @@ use std::{
     num::NonZeroU16,
 };
 
-use crate::utils;
+use crate::{tunnel_proto::types::AddressOrDomainname, utils};
 
 /// Specifies an SSH-like TCP tunnel.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TunnelSpec {
+    /// The order in which the tunnel specifications were specified by parameters. This starts at
+    /// zero and increments sequentially. This is used for printing error messages.
+    pub index: usize,
+
     /// The side which will listen for incoming TCP connections.
     pub side: TunnelSide,
 
@@ -16,23 +20,11 @@ pub struct TunnelSpec {
     pub target: TunnelTarget,
 
     /// The address or addresses to listen for incoming TCP connection at.
-    pub address: AddressOrDomainname,
-}
-
-/// Either [`SocketAddr`] or a domainname, which is a string composed of at most 256 followed by a
-/// ":port"
-#[derive(Debug, PartialEq, Eq)]
-pub enum AddressOrDomainname {
-    /// Connect to a socket address.
-    Address(SocketAddr),
-
-    /// Connect to a domainname. This string includes the port, appended as ":<port>", so this
-    /// can be given as-is to a DNS lookup function line [`tokio::net::lookup_host`].
-    Domainname(String),
+    pub listen_address: AddressOrDomainname,
 }
 
 /// Represents the possible sides for a tunnel.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TunnelSide {
     /// We locally listen for incoming connections and forward them to the remote.
     Local,
@@ -42,7 +34,7 @@ pub enum TunnelSide {
 }
 
 /// Represents the possible targets to which a TCP tunnel can forward a TCP connection.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TunnelTarget {
     /// Forward to an address or domain name with port.
     Address(AddressOrDomainname),
@@ -104,7 +96,7 @@ fn parse_address_backwards(
     arg: String,
     spec: String,
     end_index: usize,
-    port: u16,
+    port: NonZeroU16,
 ) -> Result<(String, String, Option<usize>, AddressOrDomainname), TunnelSpecErrorType> {
     let s = &spec[..end_index];
 
@@ -138,8 +130,8 @@ fn parse_address_backwards(
     };
 
     let address = match s.parse::<IpAddr>() {
-        Ok(addr) => AddressOrDomainname::Address(SocketAddr::new(addr, port)),
-        Err(_) if utils::is_valid_domainname(s) => AddressOrDomainname::Domainname(format!("{s}:{port}")),
+        Ok(addr) => AddressOrDomainname::Address(SocketAddr::new(addr, port.get())),
+        Err(_) if utils::is_valid_domainname(s) => AddressOrDomainname::Domainname(String::from(s), port),
         Err(_) => {
             return Err(TunnelSpecErrorType::InvalidAddress(
                 arg,
@@ -158,6 +150,7 @@ pub(super) fn parse_tunnel_spec_arg<F>(
     side: TunnelSide,
     mut arg: String,
     start_index: usize,
+    index: usize,
     get_next_arg: F,
 ) -> Result<TunnelSpec, TunnelSpecErrorType>
 where
@@ -180,21 +173,23 @@ where
         Some(i) => i,
         None => {
             return Ok(TunnelSpec {
+                index,
                 side,
                 target: TunnelTarget::Socks,
-                address: AddressOrDomainname::Domainname(format!("localhost:{last_port}")),
+                listen_address: AddressOrDomainname::Domainname(String::from("localhost"), last_port),
             })
         }
     };
 
-    let (arg, spec, maybe_colon_index, address) = parse_address_backwards(arg, spec, last_colon_index, last_port.get())?;
+    let (arg, spec, maybe_colon_index, address) = parse_address_backwards(arg, spec, last_colon_index, last_port)?;
     let last_colon_index = match maybe_colon_index {
         Some(i) => i,
         None => {
             return Ok(TunnelSpec {
+                index,
                 side,
                 target: TunnelTarget::Socks,
-                address,
+                listen_address: address,
             })
         }
     };
@@ -205,21 +200,23 @@ where
         Some(i) => i,
         None => {
             return Ok(TunnelSpec {
+                index,
                 side,
                 target: TunnelTarget::Address(target_address),
-                address: AddressOrDomainname::Domainname(format!("localhost:{first_port}")),
+                listen_address: AddressOrDomainname::Domainname(String::from("localhost"), first_port),
             })
         }
     };
 
-    let (arg, spec, maybe_colon_index, address) = parse_address_backwards(arg, spec, last_colon_index, first_port.get())?;
+    let (arg, spec, maybe_colon_index, address) = parse_address_backwards(arg, spec, last_colon_index, first_port)?;
     if maybe_colon_index.is_some() {
         return Err(TunnelSpecErrorType::InvalidFormat(arg, spec));
     }
 
     Ok(TunnelSpec {
+        index,
         side,
         target: TunnelTarget::Address(target_address),
-        address,
+        listen_address: address,
     })
 }

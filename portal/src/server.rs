@@ -1,8 +1,20 @@
-use quinn::{Connecting, Endpoint, RecvStream, SendStream, VarInt};
+use std::{
+    io::{self, Error, ErrorKind},
+    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
+    rc::Rc,
+};
+
+use quinn::{Connecting, Connection, Endpoint, RecvStream, SendStream, VarInt};
 use tokio::{
-    io::{stdin, stdout},
-    join, select,
+    net::{TcpListener, TcpStream},
+    select,
     task::{AbortHandle, JoinHandle},
+    try_join,
+};
+
+use crate::tunnel_proto::{
+    serialize::{ByteRead, ByteWrite},
+    types::{AddressOrDomainname, ClientStreamRequest, OpenRemoteTunnelRequest, StartConnectionError, TunnelTargetType},
 };
 
 pub async fn run_server(endpoint: Endpoint, abort_on_connect: Option<JoinHandle<()>>) {
@@ -40,7 +52,9 @@ async fn handle_connection(incoming_connection: Connecting, abort_on_connect: Op
             return;
         }
     };
+
     abort_on_connect.inspect(|h| h.abort());
+    let connection = Rc::new(connection);
 
     loop {
         let (send_stream, recv_stream) = match connection.accept_bi().await {
@@ -52,21 +66,165 @@ async fn handle_connection(incoming_connection: Connecting, abort_on_connect: Op
         };
 
         println!("Accepted bidirectional stream {} {}", send_stream.id(), recv_stream.id());
+        let connection = Rc::clone(&connection);
         tokio::task::spawn_local(async move {
-            handle_bi_stream(send_stream, recv_stream).await;
+            match handle_incoming_bi_stream(connection, send_stream, recv_stream).await {
+                Ok(()) => {}
+                Err(error) => println!("Handle bidi stream finished with error: {error}"),
+            }
         });
     }
 }
 
-async fn handle_bi_stream(mut send_stream: SendStream, mut recv_stream: RecvStream) {
-    println!("Doing bidirectional copy");
+async fn handle_incoming_bi_stream(connection: Rc<Connection>, send_stream: SendStream, mut recv_stream: RecvStream) -> io::Result<()> {
+    let request = ClientStreamRequest::read(&mut recv_stream).await?;
+    match request {
+        ClientStreamRequest::NewLocalTunnelConnection => handle_new_local_tunnel_stream(send_stream, recv_stream).await,
+        ClientStreamRequest::OpenRemoteTunnels => handle_open_remote_tunnel_stream(connection, send_stream, recv_stream).await,
+    }
+}
 
-    let mut stdout = stdout();
-    let mut stdin = stdin();
-    let (r1, r2) = join!(
-        tokio::io::copy(&mut recv_stream, &mut stdout),
-        tokio::io::copy(&mut stdin, &mut send_stream),
+async fn handle_new_local_tunnel_stream(mut send_stream: SendStream, mut recv_stream: RecvStream) -> io::Result<()> {
+    println!("Incoming connection from local tunnel");
+
+    let mut address = AddressOrDomainname::read(&mut recv_stream).await?;
+    println!("Connecting connection from remote tunnel to {address}");
+
+    let tcp_stream_result = address.bind_connect().await;
+
+    let response_result = tcp_stream_result
+        .as_ref()
+        .map(|stream| {
+            let empty_addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)); // <-- TODO: Repeated code
+            stream.local_addr().unwrap_or(empty_addr)
+        })
+        .map_err(|error| {
+            (StartConnectionError::Connect, error) // TODO: Proper StartConnectionError value
+        });
+
+    match response_result {
+        Ok(bind_address) => println!("Local tunnel connected to {address} (local socket bound at {bind_address})"),
+        Err((start_error, error)) => eprintln!("Local tunnel failed to connect to target due to {start_error} failure: {error}"),
+    }
+
+    response_result.write(&mut send_stream).await?;
+
+    let mut tcp_stream = tcp_stream_result?;
+    let (mut read_half, mut write_half) = tcp_stream.split();
+    let result = try_join!(
+        tokio::io::copy(&mut read_half, &mut send_stream),
+        tokio::io::copy(&mut recv_stream, &mut write_half),
     );
 
-    println!("Finished stream:\nstream-to-stdout result: {r1:?}\nstdin-to-stream result: {r2:?}");
+    match result {
+        Ok((sent, received)) => {
+            println!("Local tunnel ended after {sent} bytes sent and {received} bytes received");
+            Ok(())
+        }
+        Err(error) => {
+            eprintln!("Local tunnel ended with error: {error}");
+            Err(error)
+        }
+    }
+}
+
+async fn handle_open_remote_tunnel_stream(
+    connection: Rc<Connection>,
+    mut send_stream: SendStream,
+    mut recv_stream: RecvStream,
+) -> io::Result<()> {
+    loop {
+        let mut request = match OpenRemoteTunnelRequest::read(&mut recv_stream).await {
+            Ok(req) => req,
+            Err(error) if error.kind() == ErrorKind::UnexpectedEof => return Ok(()),
+            Err(error) => return Err(error),
+        };
+
+        let bind_result = request.listen_at.bind_listener().await;
+
+        let response_result = bind_result.as_ref().map(|_| ());
+        response_result.write(&mut send_stream).await?;
+
+        if let Ok(listener) = bind_result {
+            let connection = Rc::clone(&connection);
+            let tunnel_id = request.tunnel_id;
+            let target_type = request.target_type;
+            tokio::task::spawn_local(async move {
+                handle_remote_tunnel_listening(connection, listener, tunnel_id, target_type).await;
+            });
+        }
+    }
+}
+
+async fn handle_remote_tunnel_listening(connection: Rc<Connection>, listener: TcpListener, tunnel_id: u32, target_type: TunnelTargetType) {
+    loop {
+        let (tcp_stream, _from) = match listener.accept().await {
+            Ok(t) => t,
+            Err(error) => {
+                eprintln!("Error accepting new incoming connection: {error}");
+                continue;
+            }
+        };
+
+        let connection = Rc::clone(&connection);
+        tokio::task::spawn_local(async move {
+            match handle_remote_tunnel(connection, tcp_stream, tunnel_id, target_type).await {
+                Ok(()) => {}
+                Err(error) => println!("Remote tunnel task finished with error: {error}"),
+            }
+        });
+    }
+}
+
+async fn handle_remote_tunnel(
+    connection: Rc<Connection>,
+    mut tcp_stream: TcpStream,
+    tunnel_id: u32,
+    target_type: TunnelTargetType,
+) -> io::Result<()> {
+    let (mut send_stream, mut recv_stream) = match connection.open_bi().await {
+        Ok(t) => t,
+        Err(error) => {
+            eprintln!("Couldn't start remote tunnel, error while opening bidi stream: {error}");
+            return Err(error.into());
+        }
+    };
+
+    tunnel_id.write(&mut send_stream).await?;
+
+    match target_type {
+        TunnelTargetType::Static => println!("Tunneling through static tunnel"),
+        TunnelTargetType::Socks => {
+            unimplemented!("TODO: Implement SOCKS protocol")
+        }
+    }
+
+    None::<AddressOrDomainname>.write(&mut send_stream).await?;
+
+    let result = <Result<SocketAddr, (StartConnectionError, Error)> as ByteRead>::read(&mut recv_stream).await?;
+    let bound_address = match result {
+        Ok(addr) => addr,
+        Err((start_error, error)) => {
+            eprintln!("Remote tunnel failed to connect to target due to {start_error} failure: {error}");
+            return Err(error);
+        }
+    };
+
+    println!("Remote tunnel connected (remote socket bound at {bound_address})");
+    let (mut read_half, mut write_half) = tcp_stream.split();
+    let result = try_join!(
+        tokio::io::copy(&mut read_half, &mut send_stream),
+        tokio::io::copy(&mut recv_stream, &mut write_half),
+    );
+
+    match result {
+        Ok((sent, received)) => {
+            println!("Remote tunnel ended after {sent} bytes sent and {received} bytes received");
+            Ok(())
+        }
+        Err(error) => {
+            eprintln!("Remote tunnel ended with error: {error}");
+            Err(error)
+        }
+    }
 }

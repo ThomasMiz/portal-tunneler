@@ -47,6 +47,7 @@
 use std::{
     io::{Error, ErrorKind},
     net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
+    num::NonZeroU16,
 };
 
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -110,6 +111,18 @@ impl ByteWrite for u16 {
 impl ByteRead for u16 {
     async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, Error> {
         reader.read_u16().await
+    }
+}
+
+impl ByteWrite for NonZeroU16 {
+    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), Error> {
+        writer.write_u16(self.get()).await
+    }
+}
+
+impl ByteRead for NonZeroU16 {
+    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, Error> {
+        NonZeroU16::new(reader.read_u16().await?).ok_or_else(|| Error::new(ErrorKind::InvalidData, "A NonZeroU16 was zero"))
     }
 }
 
