@@ -32,7 +32,7 @@ impl AddressOrDomainname {
     // TODO: This code really shouldn't be here
     pub async fn bind_listener(&mut self) -> io::Result<TcpListener> {
         match self {
-            Self::Address(address) => TcpListener::bind(*address).await,
+            Self::Address(address) => TcpListener::bind(*address).await, // TODO: This should bind all the sockets the address yields!
             Self::Domainname(domainname, port) => {
                 let original_length = domainname.len();
                 let _ = write!(domainname, ":{port}");
