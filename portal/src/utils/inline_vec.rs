@@ -125,11 +125,13 @@ impl<const N: usize, T> InlineVec<N, T> {
             Some(element)
         } else {
             unsafe {
-                std::ptr::copy(
-                    self.inner.get_unchecked_mut(index).as_ptr(),
-                    self.inner.get_unchecked_mut(index + 1).as_mut_ptr(),
-                    self.len - index,
-                );
+                if index != self.len {
+                    std::ptr::copy(
+                        self.inner.get_unchecked_mut(index).as_ptr(),
+                        self.inner.get_unchecked_mut(index + 1).as_mut_ptr(),
+                        self.len - index,
+                    );
+                }
                 *self.inner.get_unchecked_mut(index) = MaybeUninit::new(element);
             }
             self.len += 1;
@@ -171,11 +173,13 @@ impl<const N: usize, T> InlineVec<N, T> {
             let retval = std::mem::replace(self.inner.get_unchecked_mut(index), MaybeUninit::uninit());
             self.len -= 1;
 
-            std::ptr::copy(
-                self.inner.get_unchecked_mut(index + 1).as_ptr(),
-                self.inner.get_unchecked_mut(index).as_mut_ptr(),
-                self.len - index,
-            );
+            if index != self.len {
+                std::ptr::copy(
+                    self.inner.get_unchecked_mut(index + 1).as_ptr(),
+                    self.inner.get_unchecked_mut(index).as_mut_ptr(),
+                    self.len - index,
+                );
+            }
             retval.assume_init()
         }
     }
@@ -264,5 +268,185 @@ impl<const N: usize, T> Drop for IntoIter<N, T> {
         for i in self.index..self.len {
             unsafe { self.inner.get_unchecked_mut(i).assume_init_drop() };
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ops::Deref;
+
+    use crate::utils::test_utils::DropChecker;
+
+    use super::InlineVec;
+
+    #[test]
+    fn test_push_pop() {
+        let mut vec = InlineVec::<3, i32>::new();
+
+        assert_eq!(vec.pop(), None);
+        assert_eq!(vec.len(), 0);
+        assert_eq!(vec.deref(), &[]);
+
+        assert_eq!(vec.push(1), None);
+        assert_eq!(vec.len(), 1);
+        assert_eq!(vec.deref(), &[1]);
+        assert_eq!(vec.push(2), None);
+        assert_eq!(vec.len(), 2);
+        assert_eq!(vec.deref(), &[1, 2]);
+        assert_eq!(vec.push(3), None);
+        assert_eq!(vec.len(), 3);
+        assert_eq!(vec.deref(), &[1, 2, 3]);
+        assert_eq!(vec.push(4), Some(4));
+        assert_eq!(vec.len(), 3);
+        assert_eq!(vec.deref(), &[1, 2, 3]);
+
+        assert_eq!(vec.pop(), Some(3));
+        assert_eq!(vec.len(), 2);
+        assert_eq!(vec.deref(), &[1, 2]);
+        assert_eq!(vec.pop(), Some(2));
+        assert_eq!(vec.len(), 1);
+        assert_eq!(vec.deref(), &[1]);
+        assert_eq!(vec.pop(), Some(1));
+        assert_eq!(vec.len(), 0);
+        assert_eq!(vec.deref(), &[]);
+        assert_eq!(vec.pop(), None);
+        assert_eq!(vec.len(), 0);
+        assert_eq!(vec.deref(), &[]);
+    }
+
+    #[test]
+    fn test_insert_remove() {
+        let mut vec = InlineVec::<3, _>::new();
+
+        assert_eq!(vec.insert(0, 'a'), None);
+        assert_eq!(vec.deref(), &['a']);
+        assert_eq!(vec.insert(0, 'b'), None);
+        assert_eq!(vec.deref(), &['b', 'a']);
+        assert_eq!(vec.insert(1, 'c'), None);
+        assert_eq!(vec.deref(), &['b', 'c', 'a']);
+
+        for i in 0..vec.len() {
+            assert_eq!(vec.insert(i, 'x'), Some('x'));
+        }
+
+        assert_eq!(vec.remove(0), 'b');
+        assert_eq!(vec.remove(0), 'c');
+        assert_eq!(vec.remove(0), 'a');
+        assert_eq!(vec.len(), 0);
+
+        assert_eq!(vec.insert(0, '0'), None);
+        assert_eq!(vec.deref(), &['0']);
+        assert_eq!(vec.insert(1, '1'), None);
+        assert_eq!(vec.deref(), &['0', '1']);
+        assert_eq!(vec.insert(2, '2'), None);
+        assert_eq!(vec.deref(), &['0', '1', '2']);
+        assert_eq!(vec.insert(3, '3'), Some('3'));
+        assert_eq!(vec.deref(), &['0', '1', '2']);
+
+        assert_eq!(vec.swap_remove(0), '0');
+        assert_eq!(vec.deref(), &['2', '1']);
+        assert_eq!(vec.swap_remove(1), '1');
+        assert_eq!(vec.deref(), &['2']);
+        assert_eq!(vec.push('1'), None);
+        assert_eq!(vec.push('0'), None);
+        assert_eq!(vec.deref(), &['2', '1', '0']);
+
+        assert_eq!(vec.swap_remove(2), '0');
+        assert_eq!(vec.deref(), &['2', '1']);
+        assert_eq!(vec.swap_remove(0), '2');
+        assert_eq!(vec.deref(), &['1']);
+        assert_eq!(vec.swap_remove(0), '1');
+        assert_eq!(vec.deref(), &[]);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_insert_panics0() {
+        InlineVec::<3, i32>::new().insert(1, 5);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_insert_panics1() {
+        let mut vec = InlineVec::<3, i32>::new();
+        vec.push(69);
+        vec.insert(2, 69);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_remove_panics0() {
+        InlineVec::<3, i32>::new().remove(0);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_remove_panics1() {
+        let mut vec = InlineVec::<3, i32>::new();
+        vec.push(69);
+        vec.remove(1);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_swap_remove_panics0() {
+        InlineVec::<3, i32>::new().swap_remove(0);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_swap_remove_panics1() {
+        let mut vec = InlineVec::<3, i32>::new();
+        vec.push(69);
+        vec.swap_remove(1);
+    }
+
+    #[test]
+    fn test_drops() {
+        let mut dc = DropChecker::new();
+        let mut vec = InlineVec::<3, _>::new();
+
+        assert_eq!(vec.push(dc.track(5)), None);
+        assert_eq!(vec.push(dc.track(10)), None);
+        assert_eq!(vec.pop().map(|s| s.value), Some(10));
+        assert_eq!(vec.push(dc.track(69)), None);
+
+        drop(vec);
+        dc.ensure_all_dropped();
+    }
+
+    #[test]
+    fn test_into_iter() {
+        let mut dc = DropChecker::new();
+        let mut vec = InlineVec::<3, _>::new();
+
+        assert_eq!(vec.push(dc.track(10)), None);
+        assert_eq!(vec.push(dc.track(20)), None);
+        assert_eq!(vec.push(dc.track(30)), None);
+
+        let mut iter = vec.into_iter();
+        assert!(iter.next().is_some_and(|v| v.value == 10));
+        assert!(iter.next().is_some_and(|v| v.value == 20));
+        assert!(iter.next().is_some_and(|v| v.value == 30));
+        assert_eq!(iter.next(), None);
+
+        dc.ensure_all_dropped();
+
+        let s = "jfmq29o8cut1o24t9movqj24";
+        let mut vec = InlineVec::<24, _>::new();
+
+        for ch in s.chars() {
+            assert_eq!(vec.push(dc.track(String::from(ch))), None);
+        }
+
+        let mut iter = vec.into_iter();
+        for i in 0..10 {
+            let si = iter.next().unwrap();
+            let ch = s.chars().nth(i).unwrap();
+            assert_eq!(si.value, String::from(ch));
+        }
+        drop(iter);
+
+        dc.ensure_all_dropped();
     }
 }

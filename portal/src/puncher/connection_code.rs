@@ -43,7 +43,17 @@ fn calc_checksum(buf: &[u8]) -> u16 {
 }
 
 impl ConnectionCode {
+    /// Creates a new connection code from the given address, port start, and lane count, plus the
+    /// current timestamp.
+    ///
+    /// # Panics
+    ///
+    /// Panics if adding `port_start` and `lane_count` would overflow.
     pub fn new(address: IpAddr, port_start: u16, lane_count: NonZeroU16) -> Self {
+        if port_start.checked_add(lane_count.get()).is_none() {
+            panic!("The lane_count would overflow the port_start");
+        }
+
         Self {
             address,
             port_start,
@@ -190,11 +200,8 @@ mod tests {
             IpAddr::V6("1234::9c9:3ab2:f332:23ec".parse().unwrap()),
         ];
 
-        let port_starts = [
-            0, 500, 1024, 1920, 5000, 7912, 1250, 1251, 1252, 3434, 9090, 12312, 32132, 48912, 65535,
-        ];
-
-        let lane_counts = [1, 2, 3, 4, 5, 6, 7, 8, 10, 50, 65535];
+        let port_starts = [0, 500, 1024, 1920, 5000, 7912, 1250, 1251, 1252, 3434, 9090, 12312, 32132, 48912];
+        let lane_counts = [1, 2, 3, 4, 5, 6, 7, 8, 10, 50, 10000];
 
         for address in addresses {
             for port_start in port_starts {

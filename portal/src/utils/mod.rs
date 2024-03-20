@@ -9,3 +9,6 @@ pub use macros::*;
 pub use sockets::*;
 pub use strings::*;
 pub use time::*;
+
+#[cfg(test)]
+pub mod test_utils;
