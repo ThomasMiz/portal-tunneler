@@ -94,7 +94,7 @@ pub async fn connect_client(connect_method: ConnectMethod) -> io::Result<(Endpoi
 
             let connecting = endpoint
                 .connect(destination_address, "localhost")
-                .map_err(|e| Error::new(ErrorKind::Other, format!("Error while connecting to remote endpoint: {}", e)))?;
+                .map_err(|e| Error::new(ErrorKind::Other, format!("Error while connecting to remote endpoint: {e}")))?;
 
             let connection = connecting.await?;
             Ok((endpoint, connection))

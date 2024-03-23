@@ -6,6 +6,13 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
+/// A contiguous array of elements. Similar to [`Vec<T>`], but stores elements inline instead of
+/// allocating on the heap.
+///
+/// This means this "vector" cannot store more than the constant `N` elements, and whether full or
+/// empty will always occupy as much memory as if it were full. The upside to this is that this
+/// memory is stored inline, so operations where a small vector is needed can be optimized with
+/// this type to make use of the stack, avoiding memory allocations and improving cache hits.
 pub struct InlineVec<const N: usize, T> {
     inner: [MaybeUninit<T>; N],
     len: usize,

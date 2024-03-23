@@ -1,8 +1,10 @@
 use std::{
-    fmt,
+    fmt::{self, Write},
     io::ErrorKind,
     net::{IpAddr, SocketAddr, ToSocketAddrs},
 };
+
+use crate::utils::InlineString;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum SocketErrorType {
@@ -32,12 +34,17 @@ pub(super) fn parse_socket_arg(
         None => return Err(SocketErrorType::UnexpectedEnd(arg)),
     };
 
+    // TODO: Make this support IPv6 without brackets (e.g. "--arg ::1" instead of "--arg [::1]")
     let iter = match arg2.to_socket_addrs() {
         Ok(iter) => iter,
-        Err(err) if err.kind() == ErrorKind::InvalidInput => match format!("{arg2}:{default_port}").to_socket_addrs() {
-            Ok(iter) => iter,
-            Err(_) => return Err(SocketErrorType::InvalidSocketAddress(arg, arg2)),
-        },
+        Err(err) if err.kind() == ErrorKind::InvalidInput => {
+            let mut s = InlineString::<262>::new();
+            let _ = write!(s, "{arg2}:{default_port}");
+            match s.to_socket_addrs() {
+                Ok(iter) => iter,
+                Err(_) => return Err(SocketErrorType::InvalidSocketAddress(arg, arg2)),
+            }
+        }
         Err(_) => return Err(SocketErrorType::InvalidSocketAddress(arg, arg2)),
     };
 

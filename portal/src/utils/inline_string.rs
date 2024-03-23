@@ -3,6 +3,13 @@ use std::ops::{Deref, DerefMut};
 
 use super::InlineVec;
 
+/// A UTF-8–encoded, inline string. Similar to [`String`], but stores chars inline instead of
+/// allocating on the heap.
+///
+/// This means this "string" cannot store more than the constant `N` characters, and whether full
+/// or empty will always occupy as much memory as if it were full. The upside to this is that this
+/// memory is stored inline, so operations where a small string is needed can be optimized with
+/// this type to make use of the stack, avoiding memory allocations and improving cache hits.
 #[derive(Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct InlineString<const N: usize> {
     inner: InlineVec<N, u8>,
@@ -93,26 +100,23 @@ impl<const N: usize> InlineString<N> {
     ///
     /// Returns [`None`] if this `InlineString` is empty.
     pub fn pop(&mut self) -> Option<char> {
-        let ch = self.chars().next_back()?;
-        let newlen = self.len() - ch.len_utf8();
-        unsafe {
-            self.inner.set_len(newlen);
-        }
+        let (new_len, ch) = self.char_indices().next_back()?;
+        unsafe { self.inner.set_len(new_len) };
         Some(ch)
     }
 
-    /// Truncates this `String`, removing all contents.
+    /// Truncates this `InlineString`, removing all contents.
     pub fn clear(&mut self) {
         self.inner.clear();
     }
 
-    /// Shortens this `String` to the specified length.
+    /// Shortens this `InlineString` to the specified length.
     ///
     /// # Panics
     ///
     /// Panics if `new_len` does not lie on a [`char`] boundary.
     pub fn truncate(&mut self, new_len: usize) {
-        if new_len <= self.len() {
+        if new_len < self.len() {
             if !self.is_char_boundary(new_len) {
                 panic!("new_len does not lie on a char boundary");
             }
@@ -134,6 +138,14 @@ impl<const N: usize> std::fmt::Write for InlineString<N> {
     }
 }
 
+impl<const N: usize> From<&str> for InlineString<N> {
+    fn from(value: &str) -> Self {
+        let mut s = InlineString::new();
+        s.push_str(value);
+        s
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::{fmt::Write, ops::Deref};
@@ -146,87 +158,87 @@ mod tests {
 
         assert_eq!(s.push('a'), 1);
         assert_eq!(s.len(), 1);
-        assert_eq!(s.chars().collect::<Vec<_>>(), vec!['a']);
+        assert_eq!(s.deref(), "a");
 
         assert_eq!(s.push('á'), 2);
         assert_eq!(s.len(), 3);
-        assert_eq!(s.chars().collect::<Vec<_>>(), vec!['a', 'á']);
+        assert_eq!(s.deref(), "aá");
 
         assert_eq!(s.push('b'), 1);
         assert_eq!(s.len(), 4);
-        assert_eq!(s.chars().collect::<Vec<_>>(), vec!['a', 'á', 'b']);
+        assert_eq!(s.deref(), "aáb");
 
         assert_eq!(s.push('ó'), 0);
         assert_eq!(s.len(), 4);
-        assert_eq!(s.chars().collect::<Vec<_>>(), vec!['a', 'á', 'b']);
+        assert_eq!(s.deref(), "aáb");
 
         assert_eq!(s.push_str("ó"), 0);
         assert_eq!(s.len(), 4);
-        assert_eq!(s.chars().collect::<Vec<_>>(), vec!['a', 'á', 'b']);
+        assert_eq!(s.deref(), "aáb");
 
         assert_eq!(s.push_str("o"), 1);
         assert_eq!(s.len(), 5);
-        assert_eq!(s.chars().collect::<Vec<_>>(), vec!['a', 'á', 'b', 'o']);
+        assert_eq!(s.deref(), "aábo");
 
         assert_eq!(s.push('i'), 0);
         assert_eq!(s.len(), 5);
-        assert_eq!(s.chars().collect::<Vec<_>>(), vec!['a', 'á', 'b', 'o']);
+        assert_eq!(s.deref(), "aábo");
 
         assert_eq!(s.push_str("please and thank you"), 0);
         assert_eq!(s.len(), 5);
-        assert_eq!(s.chars().collect::<Vec<_>>(), vec!['a', 'á', 'b', 'o']);
+        assert_eq!(s.deref(), "aábo");
 
         assert_eq!(s.pop(), Some('o'));
         assert_eq!(s.len(), 4);
-        assert_eq!(s.chars().collect::<Vec<_>>(), vec!['a', 'á', 'b']);
+        assert_eq!(s.deref(), "aáb");
 
         assert_eq!(s.pop(), Some('b'));
         assert_eq!(s.len(), 3);
-        assert_eq!(s.chars().collect::<Vec<_>>(), vec!['a', 'á']);
+        assert_eq!(s.deref(), "aá");
 
         assert_eq!(s.push('û'), 2);
         assert_eq!(s.len(), 5);
-        assert_eq!(s.chars().collect::<Vec<_>>(), vec!['a', 'á', 'û']);
+        assert_eq!(s.deref(), "aáû");
 
         assert_eq!(s.push('û'), 0);
         assert_eq!(s.len(), 5);
-        assert_eq!(s.chars().collect::<Vec<_>>(), vec!['a', 'á', 'û']);
+        assert_eq!(s.deref(), "aáû");
 
         assert_eq!(s.push_str("û"), 0);
         assert_eq!(s.len(), 5);
-        assert_eq!(s.chars().collect::<Vec<_>>(), vec!['a', 'á', 'û']);
+        assert_eq!(s.deref(), "aáû");
 
         assert_eq!(s.pop(), Some('û'));
         assert_eq!(s.len(), 3);
-        assert_eq!(s.chars().collect::<Vec<_>>(), vec!['a', 'á']);
+        assert_eq!(s.deref(), "aá");
 
         assert_eq!(s.push_str("êxe"), 2);
         assert_eq!(s.len(), 5);
-        assert_eq!(s.chars().collect::<Vec<_>>(), vec!['a', 'á', 'ê']);
+        assert_eq!(s.deref(), "aáê");
 
         assert_eq!(s.pop(), Some('ê'));
         assert_eq!(s.len(), 3);
-        assert_eq!(s.chars().collect::<Vec<_>>(), vec!['a', 'á']);
+        assert_eq!(s.deref(), "aá");
 
         assert_eq!(s.push_str("WHAT"), 2);
         assert_eq!(s.len(), 5);
-        assert_eq!(s.chars().collect::<Vec<_>>(), vec!['a', 'á', 'W', 'H']);
+        assert_eq!(s.deref(), "aáWH");
 
         assert_eq!(s.pop(), Some('H'));
         assert_eq!(s.len(), 4);
-        assert_eq!(s.chars().collect::<Vec<_>>(), vec!['a', 'á', 'W']);
+        assert_eq!(s.deref(), "aáW");
 
         assert_eq!(s.pop(), Some('W'));
         assert_eq!(s.len(), 3);
-        assert_eq!(s.chars().collect::<Vec<_>>(), vec!['a', 'á']);
+        assert_eq!(s.deref(), "aá");
 
         assert_eq!(s.pop(), Some('á'));
         assert_eq!(s.len(), 1);
-        assert_eq!(s.chars().collect::<Vec<_>>(), vec!['a']);
+        assert_eq!(s.deref(), "a");
 
         assert_eq!(s.pop(), Some('a'));
         assert_eq!(s.len(), 0);
-        assert_eq!(s.chars().collect::<Vec<_>>(), vec![]);
+        assert_eq!(s.deref(), "");
     }
 
     #[test]
@@ -235,21 +247,74 @@ mod tests {
 
         assert_eq!(s.push_str("ÁRTICO"), 5);
         assert_eq!(s.len(), 5);
-        assert_eq!(s.chars().collect::<Vec<_>>(), vec!['Á', 'R', 'T', 'I']);
+        assert_eq!(s.deref(), "ÁRTI");
 
         s.clear();
         assert_eq!(s.len(), 0);
+        assert_eq!(s.deref(), "");
 
         assert_eq!(s.push_str("ANTÁRTICO"), 5);
         assert_eq!(s.len(), 5);
-        assert_eq!(s.chars().collect::<Vec<_>>(), vec!['A', 'N', 'T', 'Á']);
+        assert_eq!(s.deref(), "ANTÁ");
 
         s.truncate(0);
         assert_eq!(s.len(), 0);
+        assert_eq!(s.deref(), "");
 
         assert_eq!(s.push_str("CUCHÁ"), 4);
         assert_eq!(s.len(), 4);
-        assert_eq!(s.chars().collect::<Vec<_>>(), vec!['C', 'U', 'C', 'H']);
+        assert_eq!(s.deref(), "CUCH");
+    }
+
+    #[test]
+    fn test_clear() {
+        let mut s = InlineString::<10>::from("crocante");
+
+        s.clear();
+        assert_eq!(s.len(), 0);
+        assert_eq!(s.deref(), "");
+    }
+
+    #[test]
+    fn test_truncate() {
+        let mut s = InlineString::<16>::new();
+
+        assert_eq!(s.len(), 0);
+        assert_eq!(s.deref(), "");
+
+        assert_eq!(s.push_str("á!éxíd&ó"), 12);
+        assert_eq!(s.len(), 12);
+        assert_eq!(s.deref(), "á!éxíd&ó");
+
+        s.truncate(12);
+        assert_eq!(s.len(), 12);
+        assert_eq!(s.deref(), "á!éxíd&ó");
+
+        s.truncate(10);
+        assert_eq!(s.len(), 10);
+        assert_eq!(s.deref(), "á!éxíd&");
+
+        s.truncate(250);
+        assert_eq!(s.len(), 10);
+        assert_eq!(s.deref(), "á!éxíd&");
+
+        s.truncate(9);
+        assert_eq!(s.len(), 9);
+        assert_eq!(s.deref(), "á!éxíd");
+
+        s.truncate(2);
+        assert_eq!(s.len(), 2);
+        assert_eq!(s.deref(), "á");
+
+        s.truncate(0);
+        assert_eq!(s.len(), 0);
+        assert_eq!(s.deref(), "");
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_truncate_boundary_panics() {
+        InlineString::<8>::from("ü").truncate(1);
     }
 
     #[test]
