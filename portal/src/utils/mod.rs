@@ -1,9 +1,11 @@
+mod inline_string;
 mod inline_vec;
 mod macros;
 mod sockets;
 mod strings;
 mod time;
 
+pub use inline_string::*;
 pub use inline_vec::*;
 pub use macros::*;
 pub use sockets::*;

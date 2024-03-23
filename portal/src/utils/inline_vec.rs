@@ -1,6 +1,7 @@
 use std::{
     fmt,
     hash::Hash,
+    io,
     mem::MaybeUninit,
     ops::{Deref, DerefMut},
 };
@@ -74,6 +75,7 @@ impl<const N: usize, T: Hash> Hash for InlineVec<N, T> {
 }
 
 impl<const N: usize, T> InlineVec<N, T> {
+    /// Constructs a new, empty `InlineVec`.
     pub const fn new() -> Self {
         Self {
             inner: unsafe { MaybeUninit::uninit().assume_init() },
@@ -86,7 +88,7 @@ impl<const N: usize, T> InlineVec<N, T> {
         self.len
     }
 
-    /// Returns the maximum capacity of this vector. This is the same as for `N`.
+    /// Returns the maximum capacity of this vector. This is the same as `N`.
     pub const fn capacity(&self) -> usize {
         N
     }
@@ -127,7 +129,7 @@ impl<const N: usize, T> InlineVec<N, T> {
             unsafe {
                 if index != self.len {
                     std::ptr::copy(
-                        self.inner.get_unchecked_mut(index).as_ptr(),
+                        self.inner.get_unchecked(index).as_ptr(),
                         self.inner.get_unchecked_mut(index + 1).as_mut_ptr(),
                         self.len - index,
                     );
@@ -175,7 +177,7 @@ impl<const N: usize, T> InlineVec<N, T> {
 
             if index != self.len {
                 std::ptr::copy(
-                    self.inner.get_unchecked_mut(index + 1).as_ptr(),
+                    self.inner.get_unchecked(index + 1).as_ptr(),
                     self.inner.get_unchecked_mut(index).as_mut_ptr(),
                     self.len - index,
                 );
@@ -211,6 +213,99 @@ impl<const N: usize, T> InlineVec<N, T> {
 
             retval.assume_init()
         }
+    }
+
+    /// Clears the vector, removing all values.
+    pub fn clear(&mut self) {
+        for i in 0..self.len {
+            unsafe { self.inner.get_unchecked_mut(i).assume_init_drop() };
+        }
+
+        self.len = 0;
+    }
+
+    /// Shortens the vector, keeping the first `new_len` elements and dropping the rest.
+    ///
+    /// If `new_len` is greater or equal to the vector's current length, this has no effect.
+    pub fn truncate(&mut self, new_len: usize) {
+        if new_len < self.len {
+            for i in new_len..self.len {
+                unsafe { self.inner.get_unchecked_mut(i).assume_init_drop() };
+            }
+
+            self.len = new_len;
+        }
+    }
+
+    /// Forces the length of the vector to `new_len`. This operation is unsafe, and the caller is
+    /// responsible for ensuring this type's invariants are maintaned.
+    ///
+    /// # Safety
+    ///
+    /// - `new_len` must be less than or equal to [`capacity()`].
+    /// - The elements in between the old and new lengths must be either initialized or dropped
+    /// (depending on whether the vector is being expanded or truncated).
+    ///
+    /// [`capacity()`]: InlineVec::capacity
+    pub unsafe fn set_len(&mut self, new_len: usize) {
+        self.len = new_len;
+    }
+}
+
+impl<const N: usize, T> Extend<T> for InlineVec<N, T> {
+    fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
+        for ele in iter {
+            if self.push(ele).is_some() {
+                break;
+            }
+        }
+    }
+}
+
+impl<const N: usize, T: Clone> InlineVec<N, T> {
+    /// Clones and appends as many elements as possible from the slice to the `Vec`. Returns the
+    /// amount of appended elements.
+    pub fn extend_from_slice(&mut self, other: &[T]) -> usize {
+        let count = other.len().min(self.capacity() - self.len);
+
+        if count != 0 {
+            for i in 0..count {
+                unsafe {
+                    *self.inner.get_unchecked_mut(self.len + i) = MaybeUninit::new(other.get_unchecked(i).clone());
+                }
+            }
+
+            self.len += count;
+        }
+
+        count
+    }
+}
+
+impl<const N: usize, T: Copy> InlineVec<N, T> {
+    /// Copies and appends as many elements as possible from the slice to the `Vec`. Returns the
+    /// amount of appended elements.
+    pub fn extend_from_slice_copied(&mut self, other: &[T]) -> usize {
+        let count = other.len().min(self.capacity() - self.len);
+
+        if count != 0 {
+            unsafe {
+                std::ptr::copy_nonoverlapping(other.as_ptr(), self.inner.get_unchecked_mut(self.len).as_mut_ptr(), count);
+                self.len += count;
+            }
+        }
+
+        count
+    }
+}
+
+impl<const N: usize> io::Write for InlineVec<N, u8> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        Ok(self.extend_from_slice_copied(buf))
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
     }
 }
 
@@ -273,7 +368,7 @@ impl<const N: usize, T> Drop for IntoIter<N, T> {
 
 #[cfg(test)]
 mod tests {
-    use std::ops::Deref;
+    use std::{io::Write, ops::Deref};
 
     use crate::utils::test_utils::DropChecker;
 
@@ -448,5 +543,31 @@ mod tests {
         drop(iter);
 
         dc.ensure_all_dropped();
+    }
+
+    #[test]
+    fn test_write() {
+        let mut vec = InlineVec::<5, u8>::new();
+
+        assert!(vec.write(&[4, 20]).is_ok_and(|v| v == 2));
+        assert_eq!(vec.deref(), &[4, 20]);
+
+        assert_eq!(vec.push(69), None);
+        assert_eq!(vec.deref(), &[4, 20, 69]);
+
+        assert!(vec.write(&[7, 8, 9, 10, 11, 12]).is_ok_and(|v| v == 2));
+        assert_eq!(vec.deref(), &[4, 20, 69, 7, 8]);
+
+        assert!(vec.write(&[50]).is_ok_and(|v| v == 0));
+        assert_eq!(vec.deref(), &[4, 20, 69, 7, 8]);
+
+        assert_eq!(vec.pop(), Some(8));
+        assert_eq!(vec.deref(), &[4, 20, 69, 7]);
+
+        assert!(vec.write(&[90, 91, 92, 93, 94, 95, 96]).is_ok_and(|v| v == 1));
+        assert_eq!(vec.deref(), &[4, 20, 69, 7, 90]);
+
+        assert!(vec.write(&[100, 101, 102, 103, 104]).is_ok_and(|v| v == 0));
+        assert_eq!(vec.deref(), &[4, 20, 69, 7, 90]);
     }
 }
