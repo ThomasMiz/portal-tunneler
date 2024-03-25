@@ -1,11 +1,17 @@
 use std::{
     future::poll_fn,
     io::{self, ErrorKind},
-    net::SocketAddr,
+    net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
     task::Poll,
 };
 
 use tokio::net::UdpSocket;
+
+/// An empty IPv4 [`SocketAddr`] with port 0
+pub const UNSPECIFIED_SOCKADDR_V4: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0));
+
+/// An empty IPv6 [`SocketAddr`] with port, flowinfo, and scope_id all set to 0.
+pub const UNSPECIFIED_SOCKADDR_V6: SocketAddr = SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, 0, 0, 0));
 
 /// Returns whether a string is a valid domain name, checking the string's length and characters.
 ///

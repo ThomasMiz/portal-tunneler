@@ -1,13 +1,11 @@
 use std::{
     collections::HashMap,
     io::{self, Error, ErrorKind},
-    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     rc::Rc,
 };
 
 use quinn::{Connection, ConnectionError, RecvStream, SendStream};
 use tokio::{
-    io::AsyncReadExt,
     net::{TcpListener, TcpStream},
     try_join,
 };
@@ -15,9 +13,16 @@ use tokio::{
 use crate::{
     args::{TunnelSide, TunnelSpec, TunnelTarget},
     tunnel_proto::{
+        local_tunnels::{OpenLocalConnectionRequestRef, OpenLocalConnectionResponse},
+        remote_tunnels::{
+            OpenRemoteConnectionRequest, OpenRemoteConnectionResponseRef, StartRemoteTunnelRequestRef, StartRemoteTunnelResponse,
+            TunnelTargetType,
+        },
+        requests::ClientStreamRequest,
+        responses::OpenConnectionError,
         serialize::{ByteRead, ByteWrite},
-        types::{AddressOrDomainname, ClientStreamRequest, OpenRemoteTunnelRequestRef, StartConnectionError, TunnelTargetType},
     },
+    utils::UNSPECIFIED_SOCKADDR_V4,
 };
 
 pub async fn run_client(connection: Connection, tunnels: Vec<TunnelSpec>) -> io::Result<()> {
@@ -78,7 +83,7 @@ async fn create_remote_tunnels(connection: &Connection, remote_tunnel_specs: Vec
     }
 
     let (mut send_stream, mut recv_stream) = connection.open_bi().await?;
-    ClientStreamRequest::OpenRemoteTunnels.write(&mut send_stream).await?;
+    ClientStreamRequest::StartRemoteTunnels.write(&mut send_stream).await?;
 
     async fn send_tunnel_specs_task(send_stream: &mut SendStream, remote_tunnel_specs: &[TunnelSpec]) -> io::Result<()> {
         for (i, spec) in remote_tunnel_specs.iter().enumerate() {
@@ -87,7 +92,7 @@ async fn create_remote_tunnels(connection: &Connection, remote_tunnel_specs: Vec
                 TunnelTarget::Socks => TunnelTargetType::Socks,
             };
 
-            let request = OpenRemoteTunnelRequestRef::new(i as u32, target_type, spec.listen_address.as_ref());
+            let request = StartRemoteTunnelRequestRef::new(i as u32, target_type, spec.listen_address.as_ref());
             request.write(send_stream).await?;
         }
 
@@ -102,12 +107,12 @@ async fn create_remote_tunnels(connection: &Connection, remote_tunnel_specs: Vec
         let mut map = HashMap::new();
 
         for (i, spec) in remote_tunnel_specs.iter().enumerate() {
-            let result = <Result<(), Error> as ByteRead>::read(recv_stream).await?;
-            match result {
+            let response = StartRemoteTunnelResponse::read(recv_stream).await?;
+            match response.result {
                 Ok(()) => {
-                    map.insert(i as u32, spec.clone()); // <-- This clone could be avoided
+                    map.insert(i as u32, spec.clone()); // <-- TODO: This clone could be avoided
                 }
-                Err(error) => eprintln!("Couldn't open remote tunnel {}, server responded with error: {error}", spec.index),
+                Err(error) => eprintln!("Couldn't start remote tunnel {}, server responded with error: {error}", spec.index),
             }
         }
 
@@ -153,21 +158,17 @@ async fn handle_local_tunnel_listening(connection: Rc<Connection>, listener: Tcp
 
 async fn handle_local_tunnel(connection: Rc<Connection>, mut tcp_stream: TcpStream, spec: Rc<TunnelSpec>) -> io::Result<()> {
     let (mut send_stream, mut recv_stream) = connection.open_bi().await?;
-    ClientStreamRequest::NewLocalTunnelConnection.write(&mut send_stream).await?;
-    match &spec.target {
-        TunnelTarget::Socks => unimplemented!("TODO: Implement SOCKS protocol"),
-        TunnelTarget::Address(address) => address.write(&mut send_stream).await?,
-    }
+    ClientStreamRequest::OpenLocalTunnelConnection.write(&mut send_stream).await?;
 
-    let result = match <Result<SocketAddr, (StartConnectionError, Error)> as ByteRead>::read(&mut recv_stream).await {
-        Ok(result) => result,
-        Err(error) => {
-            eprintln!("IO error while getting result from new local tunnel: {error}");
-            return Err(error);
-        }
+    let request = match &spec.target {
+        TunnelTarget::Socks => unimplemented!("TODO: Implement SOCKS protocol"),
+        TunnelTarget::Address(address) => OpenLocalConnectionRequestRef::new(address.as_ref()),
     };
 
-    let bind_address = match result {
+    request.write(&mut send_stream).await?;
+
+    let response = OpenLocalConnectionResponse::read(&mut recv_stream).await?;
+    let bind_address = match response.result {
         Ok(address) => address,
         Err((start_error, error)) => {
             eprintln!("Failed to connect local tunnel, server responded with {start_error} failure: {error}");
@@ -203,9 +204,10 @@ async fn handle_incoming_bi_stream(
     // Incoming (server-opened) bidi streams are exclusively used for new connections in a remote tunnel.
 
     println!("Incoming connection from remote tunnel");
-    let tunnel_id = recv_stream.read_u32().await?;
 
-    let spec = match remote_tunnels.get(&tunnel_id) {
+    let request = OpenRemoteConnectionRequest::read(&mut recv_stream).await?;
+
+    let spec = match remote_tunnels.get(&request.tunnel_id) {
         Some(spec) => spec,
         None => {
             eprintln!("Error: Server opened a new tunnel but specified invalid tunnel ID");
@@ -213,11 +215,9 @@ async fn handle_incoming_bi_stream(
         }
     };
 
-    let maybe_target = <Option<AddressOrDomainname> as ByteRead>::read(&mut recv_stream).await?;
-
     let mut address = match &spec.target {
         TunnelTarget::Socks => {
-            let target_address = match maybe_target {
+            let target_address = match request.maybe_target {
                 Some(addr) => addr,
                 None => {
                     eprintln!("The server specified an address as target on a static tunnel");
@@ -241,12 +241,9 @@ async fn handle_incoming_bi_stream(
 
     let response_result = tcp_stream_result
         .as_ref()
-        .map(|stream| {
-            let empty_addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)); // <-- TODO: Repeated code
-            stream.local_addr().unwrap_or(empty_addr)
-        })
+        .map(|stream| stream.local_addr().unwrap_or(UNSPECIFIED_SOCKADDR_V4))
         .map_err(|error| {
-            (StartConnectionError::Connect, error) // TODO: Proper StartConnectionError value
+            (OpenConnectionError::Connect, error) // TODO: Proper StartConnectionError value
         });
 
     match response_result {
@@ -254,7 +251,9 @@ async fn handle_incoming_bi_stream(
         Err((start_error, error)) => eprintln!("Remote tunnel failed to connect to target due to {start_error} failure: {error}"),
     }
 
-    response_result.write(&mut send_stream).await?;
+    OpenRemoteConnectionResponseRef::new(response_result)
+        .write(&mut send_stream)
+        .await?;
 
     let mut tcp_stream = tcp_stream_result?;
     let (mut read_half, mut write_half) = tcp_stream.split();

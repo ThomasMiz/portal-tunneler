@@ -1,6 +1,5 @@
 use std::{
-    io::{self, Error, ErrorKind},
-    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
+    io::{self, ErrorKind},
     rc::Rc,
 };
 
@@ -12,9 +11,18 @@ use tokio::{
     try_join,
 };
 
-use crate::tunnel_proto::{
-    serialize::{ByteRead, ByteWrite},
-    types::{AddressOrDomainname, ClientStreamRequest, OpenRemoteTunnelRequest, StartConnectionError, TunnelTargetType},
+use crate::{
+    tunnel_proto::{
+        local_tunnels::{OpenLocalConnectionRequest, OpenLocalConnectionResponseRef},
+        remote_tunnels::{
+            OpenRemoteConnectionRequestRef, OpenRemoteConnectionResponse, StartRemoteTunnelRequest, StartRemoteTunnelResponseRef,
+            TunnelTargetType,
+        },
+        requests::ClientStreamRequest,
+        responses::OpenConnectionError,
+        serialize::{ByteRead, ByteWrite},
+    },
+    utils::UNSPECIFIED_SOCKADDR_V4,
 };
 
 pub async fn run_server(endpoint: Endpoint, abort_on_connect: Option<JoinHandle<()>>) {
@@ -79,35 +87,35 @@ async fn handle_connection(incoming_connection: Connecting, abort_on_connect: Op
 async fn handle_incoming_bi_stream(connection: Rc<Connection>, send_stream: SendStream, mut recv_stream: RecvStream) -> io::Result<()> {
     let request = ClientStreamRequest::read(&mut recv_stream).await?;
     match request {
-        ClientStreamRequest::NewLocalTunnelConnection => handle_new_local_tunnel_stream(send_stream, recv_stream).await,
-        ClientStreamRequest::OpenRemoteTunnels => handle_open_remote_tunnel_stream(connection, send_stream, recv_stream).await,
+        ClientStreamRequest::OpenLocalTunnelConnection => handle_open_local_tunnel_stream(send_stream, recv_stream).await,
+        ClientStreamRequest::StartRemoteTunnels => handle_start_remote_tunnels_stream(connection, send_stream, recv_stream).await,
     }
 }
 
-async fn handle_new_local_tunnel_stream(mut send_stream: SendStream, mut recv_stream: RecvStream) -> io::Result<()> {
-    println!("Incoming connection from local tunnel");
+async fn handle_open_local_tunnel_stream(mut send_stream: SendStream, mut recv_stream: RecvStream) -> io::Result<()> {
+    println!("Incoming connection from on tunnel");
 
-    let mut address = AddressOrDomainname::read(&mut recv_stream).await?;
-    println!("Connecting connection from remote tunnel to {address}");
+    let mut request = OpenLocalConnectionRequest::read(&mut recv_stream).await?;
+    println!("Connecting connection from remote tunnel to {}", request.target);
 
-    let tcp_stream_result = address.bind_connect().await;
+    let tcp_stream_result = request.target.bind_connect().await;
 
     let response_result = tcp_stream_result
         .as_ref()
-        .map(|stream| {
-            let empty_addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)); // <-- TODO: Repeated code
-            stream.local_addr().unwrap_or(empty_addr)
-        })
+        .map(|stream| stream.local_addr().unwrap_or(UNSPECIFIED_SOCKADDR_V4))
         .map_err(|error| {
-            (StartConnectionError::Connect, error) // TODO: Proper StartConnectionError value
+            (OpenConnectionError::Connect, error) // TODO: Proper OpenConnectionError value
         });
 
     match response_result {
-        Ok(bind_address) => println!("Local tunnel connected to {address} (local socket bound at {bind_address})"),
+        Ok(bind_address) => println!(
+            "Local tunnel connected to {} (local socket bound at {bind_address})",
+            request.target
+        ),
         Err((start_error, error)) => eprintln!("Local tunnel failed to connect to target due to {start_error} failure: {error}"),
     }
 
-    response_result.write(&mut send_stream).await?;
+    OpenLocalConnectionResponseRef::new(response_result).write(&mut send_stream).await?;
 
     let mut tcp_stream = tcp_stream_result?;
     let (mut read_half, mut write_half) = tcp_stream.split();
@@ -128,22 +136,21 @@ async fn handle_new_local_tunnel_stream(mut send_stream: SendStream, mut recv_st
     }
 }
 
-async fn handle_open_remote_tunnel_stream(
+async fn handle_start_remote_tunnels_stream(
     connection: Rc<Connection>,
     mut send_stream: SendStream,
     mut recv_stream: RecvStream,
 ) -> io::Result<()> {
     loop {
-        let mut request = match OpenRemoteTunnelRequest::read(&mut recv_stream).await {
+        let mut request = match StartRemoteTunnelRequest::read(&mut recv_stream).await {
             Ok(req) => req,
             Err(error) if error.kind() == ErrorKind::UnexpectedEof => return Ok(()),
             Err(error) => return Err(error),
         };
 
         let bind_result = request.listen_at.bind_listener().await;
-
-        let response_result = bind_result.as_ref().map(|_| ());
-        response_result.write(&mut send_stream).await?;
+        let response = StartRemoteTunnelResponseRef::new(bind_result.as_ref().map(|_| ()));
+        response.write(&mut send_stream).await?;
 
         if let Ok(listener) = bind_result {
             let connection = Rc::clone(&connection);
@@ -190,19 +197,21 @@ async fn handle_remote_tunnel(
         }
     };
 
-    tunnel_id.write(&mut send_stream).await?;
-
-    match target_type {
-        TunnelTargetType::Static => println!("Tunneling through static tunnel"),
+    let maybe_target = match target_type {
+        TunnelTargetType::Static => {
+            println!("Tunneling through static tunnel");
+            None
+        }
         TunnelTargetType::Socks => {
             unimplemented!("TODO: Implement SOCKS protocol")
         }
-    }
+    };
 
-    None::<AddressOrDomainname>.write(&mut send_stream).await?;
+    let request = OpenRemoteConnectionRequestRef::new(tunnel_id, maybe_target);
+    request.write(&mut send_stream).await?;
 
-    let result = <Result<SocketAddr, (StartConnectionError, Error)> as ByteRead>::read(&mut recv_stream).await?;
-    let bound_address = match result {
+    let response = OpenRemoteConnectionResponse::read(&mut recv_stream).await?;
+    let bound_address = match response.result {
         Ok(addr) => addr,
         Err((start_error, error)) => {
             eprintln!("Remote tunnel failed to connect to target due to {start_error} failure: {error}");
