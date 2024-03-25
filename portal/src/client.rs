@@ -32,7 +32,7 @@ pub async fn run_client(connection: Connection, tunnels: Vec<TunnelSpec>) -> io:
 
     let mut remote_tunnel_specs = Vec::new();
 
-    for mut spec in tunnels.into_iter() {
+    for spec in tunnels.into_iter() {
         if spec.side == TunnelSide::Remote {
             remote_tunnel_specs.push(spec);
             continue;
@@ -215,7 +215,7 @@ async fn handle_incoming_bi_stream(
         }
     };
 
-    let mut address = match &spec.target {
+    let address = match &spec.target {
         TunnelTarget::Socks => {
             let target_address = match request.maybe_target {
                 Some(addr) => addr,

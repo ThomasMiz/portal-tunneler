@@ -95,7 +95,7 @@ async fn handle_incoming_bi_stream(connection: Rc<Connection>, send_stream: Send
 async fn handle_open_local_tunnel_stream(mut send_stream: SendStream, mut recv_stream: RecvStream) -> io::Result<()> {
     println!("Incoming connection from on tunnel");
 
-    let mut request = OpenLocalConnectionRequest::read(&mut recv_stream).await?;
+    let request = OpenLocalConnectionRequest::read(&mut recv_stream).await?;
     println!("Connecting connection from remote tunnel to {}", request.target);
 
     let tcp_stream_result = request.target.bind_connect().await;
@@ -142,7 +142,7 @@ async fn handle_start_remote_tunnels_stream(
     mut recv_stream: RecvStream,
 ) -> io::Result<()> {
     loop {
-        let mut request = match StartRemoteTunnelRequest::read(&mut recv_stream).await {
+        let request = match StartRemoteTunnelRequest::read(&mut recv_stream).await {
             Ok(req) => req,
             Err(error) if error.kind() == ErrorKind::UnexpectedEof => return Ok(()),
             Err(error) => return Err(error),

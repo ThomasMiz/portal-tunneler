@@ -10,6 +10,8 @@ use tokio::{
     net::{TcpListener, TcpStream},
 };
 
+use crate::utils::InlineString;
+
 use super::serialize::{ByteRead, ByteWrite, SmallReadString, SmallWriteString};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,33 +29,27 @@ impl AddressOrDomainname {
     }
 
     // TODO: This code really shouldn't be here
-    pub async fn bind_listener(&mut self) -> io::Result<TcpListener> {
+    pub async fn bind_listener(&self) -> io::Result<TcpListener> {
         match self {
             Self::Address(address) => TcpListener::bind(*address).await, // TODO: This should bind all the sockets the address yields!
             Self::Domainname(domainname, port) => {
-                let original_length = domainname.len();
-                let _ = write!(domainname, ":{port}");
+                let mut s = InlineString::<262>::new();
+                let _ = write!(s, "{domainname}:{port}");
 
-                let result = TcpListener::bind(domainname.as_str()).await;
-                domainname.truncate(original_length);
-
-                result
+                TcpListener::bind(s.as_str()).await
             }
         }
     }
 
     // TODO: This code really shouldn't be here
-    pub async fn bind_connect(&mut self) -> io::Result<TcpStream> {
+    pub async fn bind_connect(&self) -> io::Result<TcpStream> {
         match self {
             Self::Address(address) => TcpStream::connect(*address).await,
             Self::Domainname(domainname, port) => {
-                let original_length = domainname.len();
-                let _ = write!(domainname, ":{port}");
+                let mut s = InlineString::<262>::new();
+                let _ = write!(s, "{domainname}:{port}");
 
-                let result = TcpStream::connect(domainname.as_str()).await;
-                domainname.truncate(original_length);
-
-                result
+                TcpStream::connect(s.as_str()).await
             }
         }
     }
