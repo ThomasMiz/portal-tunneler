@@ -13,7 +13,7 @@
 //! use inlined::TinyString;
 //! use std::fmt::Write;
 //!
-//! let mut s = TinyString::new();
+//! let mut s = TinyString::<32>::new(); // 32 is the maximum length of the string
 //!
 //! s.push_str("Hello!");
 //! assert_eq!(s.as_str(), "Hello!");

@@ -1,112 +1,77 @@
-use std::{
-    hash::Hash,
-    mem::MaybeUninit,
-    ops::{Deref, DerefMut},
-};
+use core::fmt;
+use std::ops::{Deref, DerefMut};
 
-/// A UTF-8–encoded, inline string of up to [`u8::MAX`] characters. Similar to
-/// [`InlineString`](super::InlineString) in that it stores chars inline instead of allocating on
-/// the heap, but has a set capacity of 255 and the length is an `u8` instead of an `usize`.
-pub struct TinyString {
-    len: u8,
-    inner: [MaybeUninit<u8>; 255],
+use super::TinyVec;
+
+/// A UTF-8–encoded, inline string. Similar to [`String`], but stores chars inline instead of
+/// allocating on the heap. Similar to [`InlineString`](super::InlineString), but has an `u8`
+/// length instead of `usize`, and thus cannot have a capacity greater than 255.
+///
+/// This means this "string" cannot store more than the constant `N` characters, and whether full
+/// or empty will always occupy as much memory as if it were full. The upside to this is that this
+/// memory is stored inline, so operations where a small string is needed can be optimized with
+/// this type to make use of the stack, avoiding memory allocations and improving cache hits.
+///
+/// `N` should be strictly lower than 256.
+#[derive(Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct TinyString<const N: usize> {
+    inner: TinyVec<N, u8>,
 }
 
-impl Deref for TinyString {
+impl<const N: usize> Deref for TinyString<N> {
     type Target = str;
 
     fn deref(&self) -> &Self::Target {
-        unsafe { std::mem::transmute(self.inner.get_unchecked(..(self.len as usize))) }
+        unsafe { std::str::from_utf8_unchecked(self.inner.as_slice()) }
     }
 }
 
-impl DerefMut for TinyString {
+impl<const N: usize> DerefMut for TinyString<N> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        unsafe { std::mem::transmute(self.inner.get_unchecked_mut(..(self.len as usize))) }
+        unsafe { std::str::from_utf8_unchecked_mut(&mut self.inner) }
     }
 }
 
-impl std::fmt::Debug for TinyString {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Debug::fmt(self.deref(), f)
+impl<const N: usize> fmt::Debug for TinyString<N> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self.deref(), f)
     }
 }
 
-impl std::fmt::Display for TinyString {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Display::fmt(self.deref(), f)
+impl<const N: usize> fmt::Display for TinyString<N> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(self.deref(), f)
     }
 }
 
-impl Clone for TinyString {
-    #[allow(clippy::non_canonical_clone_impl)]
-    fn clone(&self) -> Self {
-        let mut result = Self {
-            len: self.len,
-            inner: unsafe { MaybeUninit::uninit().assume_init() },
-        };
-
-        unsafe { std::ptr::copy_nonoverlapping(self.inner.as_ptr(), result.inner.as_mut_ptr(), self.len as usize) };
-
-        result
-    }
-}
-
-impl Copy for TinyString {}
-
-impl Default for TinyString {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl PartialEq for TinyString {
-    fn eq(&self, other: &Self) -> bool {
-        self.deref().eq(other.deref())
-    }
-}
-
-impl Eq for TinyString {}
-
-impl PartialOrd for TinyString {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for TinyString {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.deref().cmp(other.deref())
-    }
-}
-
-impl Hash for TinyString {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.deref().hash(state)
-    }
-}
-
-impl TinyString {
+impl<const N: usize> TinyString<N> {
     /// Creates a new empty `TinyString`.
     pub const fn new() -> Self {
-        Self {
-            len: 0,
-            inner: unsafe { MaybeUninit::uninit().assume_init() },
-        }
+        Self { inner: TinyVec::new() }
     }
 
     /// Returns the length of this `TinyString`, in bytes.
     pub const fn len(&self) -> u8 {
-        self.len
+        self.inner.len()
     }
 
     /// Returns `true` if this `TinyString` has a length of zero, and `false` otherwise.
     pub const fn is_empty(&self) -> bool {
-        self.len == 0
+        self.inner.is_empty()
     }
 
-    /// Returns a string slice with the contents of this `TinyString`.
+    /// Returns the maximum capacity of this vector. This is `N` clamped up to 255.
+    pub const fn capacity(&self) -> u8 {
+        self.inner.capacity()
+    }
+
+    /// Returns a string slice over the contents of this `TinyString`.
     pub fn as_str(&self) -> &str {
+        self
+    }
+
+    /// Returns a mutable string slice over the contents of this `TinyString`.
+    pub fn as_mut_str(&mut self) -> &mut str {
         self
     }
 
@@ -117,25 +82,14 @@ impl TinyString {
     /// char boundaries. This means that if your `TinyString` has only one remaining byte of
     /// capacity and you try to push an 'á' character (whose size is 2 bytes), nothing will occur.
     pub fn push_str(&mut self, string: &str) -> u8 {
-        let remaining_capacity = u8::MAX - self.len();
+        let remaining_capacity = self.capacity() - self.len();
 
-        let byte_count = match remaining_capacity as usize >= string.len() {
+        let byte_count = match string.len() <= remaining_capacity as usize {
             true => string.len(),
             false => string.floor_char_boundary(remaining_capacity as usize),
         };
 
-        if byte_count != 0 {
-            unsafe {
-                std::ptr::copy_nonoverlapping(
-                    string.as_ptr(),
-                    self.inner.get_unchecked_mut(self.len as usize).as_mut_ptr(),
-                    byte_count,
-                );
-            }
-
-            self.len += byte_count as u8;
-        }
-
+        unsafe { self.inner.extend_from_slice_copied(string.as_bytes().get_unchecked(0..byte_count)) };
         byte_count as u8
     }
 
@@ -146,37 +100,31 @@ impl TinyString {
     /// remaining byte of capacity and you try to push an 'á' character (whose size is 2 bytes),
     /// nothing will occur.
     pub fn push(&mut self, ch: char) -> u8 {
-        let mut buf = [0; 4];
-        let ch_bytes = ch.encode_utf8(&mut buf).as_bytes();
-        let ch_len = ch_bytes.len() as u8;
-
-        if ch_len > u8::MAX - self.len {
+        let utf8_len = ch.len_utf8() as u8;
+        if utf8_len > self.capacity() - self.len() {
             return 0;
         }
 
-        unsafe {
-            std::ptr::copy_nonoverlapping(
-                ch_bytes.as_ptr(),
-                self.inner.get_unchecked_mut(self.len as usize).as_mut_ptr(),
-                ch_bytes.len(),
-            );
+        match utf8_len {
+            1 => {
+                let _ = self.inner.push(ch as u8);
+                1
+            }
+            _ => self.inner.extend_from_slice(ch.encode_utf8(&mut [0; 4]).as_bytes()),
         }
-
-        self.len += ch_len;
-        ch_len
     }
 
-    /// Removes the last character from this `TinyString` and returns [`Some`] with it, or [`None`]
-    /// if the string was empty.
+    /// Removes the last character from this `TinyString` and returns [`Some`] with it, or
+    /// [`None`] if the string was empty.
     pub fn pop(&mut self) -> Option<char> {
         let (new_len, ch) = self.char_indices().next_back()?;
-        self.len = new_len as u8;
+        unsafe { self.inner.set_len(new_len as u8) };
         Some(ch)
     }
 
     /// Clears this `TinyString`, removing all contents.
     pub fn clear(&mut self) {
-        self.len = 0;
+        self.inner.clear();
     }
 
     /// Shortens this `TinyString` to the specified length.
@@ -190,45 +138,36 @@ impl TinyString {
                 panic!("new_len does not lie on a char boundary");
             }
 
-            self.len = new_len;
+            self.inner.truncate(new_len);
         }
     }
 
-    /// Gets a mutable reference to this `TinyString`'s raw underlying buffer. This operation is
-    /// unsafe, and the caller is responsible for ensuring this type's invariants are maintaned.
+    /// Returns a mutable reference to this [`TinyString`]'s internal [`TinyVec`].
     ///
     /// # Safety
     ///
-    /// - The final contents of the buffer must be valid UTF-8.
-    pub unsafe fn as_mut_buffer(&mut self) -> &mut [MaybeUninit<u8>; 255] {
+    /// This function is unsafe because the returned `&mut TinyVec` allows writing bytes which are
+    /// not valid UTF-8. If this constraint is violated, using the original `TinyString` after
+    /// dropping the `&mut TinyVec` may violate memory safety, as strings are assumed to be valid
+    /// UTF-8.
+    pub unsafe fn as_mut_vec(&mut self) -> &mut TinyVec<N, u8> {
         &mut self.inner
-    }
-
-    /// Forces the length of this `TinyString` to `new_len`. This operation is unsafe, and the
-    /// caller is responsible for ensuring this type's invariants are maintaned.
-    ///
-    /// # Safety
-    ///
-    /// - The elements in between the old and new lengths must be initialized.
-    /// - The final contents of the buffer must be valid UTF-8.
-    pub unsafe fn set_len(&mut self, new_len: u8) {
-        self.len = new_len;
     }
 }
 
-impl std::fmt::Write for TinyString {
-    fn write_str(&mut self, s: &str) -> std::fmt::Result {
+impl<const N: usize> std::fmt::Write for TinyString<N> {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
         self.push_str(s);
         Ok(())
     }
 
-    fn write_char(&mut self, c: char) -> std::fmt::Result {
+    fn write_char(&mut self, c: char) -> fmt::Result {
         self.push(c);
         Ok(())
     }
 }
 
-impl From<&str> for TinyString {
+impl<const N: usize> From<&str> for TinyString<N> {
     fn from(value: &str) -> Self {
         let mut s = TinyString::new();
         s.push_str(value);
@@ -246,7 +185,7 @@ mod tests {
 
     #[test]
     fn test_push_pop() {
-        let mut s = TinyString::new();
+        let mut s = TinyString::<255>::new();
 
         assert_eq!(s.push('a'), 1);
         assert_eq!(s.len(), 1);
@@ -318,7 +257,7 @@ mod tests {
 
     #[test]
     fn test_clear() {
-        let mut s = TinyString::from("crocante");
+        let mut s = TinyString::<16>::from("crocante");
 
         s.clear();
         assert_eq!(s.len(), 0);
@@ -327,7 +266,7 @@ mod tests {
 
     #[test]
     fn test_truncate() {
-        let mut s = TinyString::new();
+        let mut s = TinyString::<16>::new();
 
         assert_eq!(s.len(), 0);
         assert_eq!(s.deref(), "");
@@ -364,12 +303,12 @@ mod tests {
     #[test]
     #[should_panic]
     fn test_truncate_boundary_panics() {
-        TinyString::from("ü").truncate(1);
+        TinyString::<4>::from("ü").truncate(1);
     }
 
     #[test]
     fn test_write() {
-        let mut s = TinyString::new();
+        let mut s = TinyString::<16>::new();
 
         assert_eq!(write!(s, "Hello: {}", 123), Ok(()));
         assert_eq!(s.deref(), "Hello: 123");

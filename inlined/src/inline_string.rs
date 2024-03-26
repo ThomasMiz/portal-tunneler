@@ -62,8 +62,13 @@ impl<const N: usize> InlineString<N> {
         self.inner.capacity()
     }
 
-    /// Returns a string slice with the contents of this `InlineString`.
+    /// Returns a string slice over the contents of this `InlineString`.
     pub fn as_str(&self) -> &str {
+        self
+    }
+
+    /// Returns a mutable string slice over the contents of this `InlineString`.
+    pub fn as_mut_str(&mut self) -> &mut str {
         self
     }
 
@@ -76,7 +81,7 @@ impl<const N: usize> InlineString<N> {
     pub fn push_str(&mut self, string: &str) -> usize {
         let remaining_capacity = self.capacity() - self.len();
 
-        let byte_count = match remaining_capacity >= string.len() {
+        let byte_count = match string.len() <= remaining_capacity {
             true => string.len(),
             false => string.floor_char_boundary(remaining_capacity),
         };
@@ -132,6 +137,18 @@ impl<const N: usize> InlineString<N> {
 
             self.inner.truncate(new_len);
         }
+    }
+
+    /// Returns a mutable reference to this [`InlineString`]'s internal [`InlineVec`].
+    ///
+    /// # Safety
+    ///
+    /// This function is unsafe because the returned `&mut InlineVec` allows writing bytes which
+    /// are not valid UTF-8. If this constraint is violated, using the original `InlineString`
+    /// after dropping the `&mut InlineVec` may violate memory safety, as strings are assumed to be
+    /// valid UTF-8.
+    pub unsafe fn as_mut_vec(&mut self) -> &mut InlineVec<N, u8> {
+        &mut self.inner
     }
 }
 

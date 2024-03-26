@@ -14,8 +14,8 @@ use std::{
 /// memory is stored inline, so operations where a small vector is needed can be optimized with
 /// this type to make use of the stack, avoiding memory allocations and improving cache hits.
 pub struct InlineVec<const N: usize, T> {
-    inner: [MaybeUninit<T>; N],
     len: usize,
+    inner: [MaybeUninit<T>; N],
 }
 
 impl<const N: usize, T> Deref for InlineVec<N, T> {
@@ -105,12 +105,12 @@ impl<const N: usize, T> InlineVec<N, T> {
         N
     }
 
-    /// Returns a slice containing the elements of this `InlineVec`.
+    /// Returns a slice over the elements of this `InlineVec`.
     pub fn as_slice(&self) -> &[T] {
         self
     }
 
-    /// Returns a mutable slice containing the elements of this `InlineVec`.
+    /// Returns a mutable slice over the elements of this `InlineVec`.
     pub fn as_mut_slice(&mut self) -> &mut [T] {
         self
     }

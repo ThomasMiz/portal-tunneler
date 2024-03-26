@@ -7,8 +7,8 @@ use std::{
 };
 
 /// A contiguous array of elements. Similar to [`Vec<T>`], but stores elements inline instead of
-/// allocating on the heap. Similar to [`InlineVec`](super::InlineVec), but has
-/// an `u8` length instead of `usize`.
+/// allocating on the heap. Similar to [`InlineVec`](super::InlineVec), but has an `u8` length
+/// instead of `usize`, and thus cannot have a capacity greater than 255.
 ///
 /// This means this "vector" cannot store more than the constant `N` elements, and whether full or
 /// empty will always occupy as much memory as if it were full. The upside to this is that this
@@ -17,8 +17,8 @@ use std::{
 ///
 /// `N` should be strictly lower than 256.
 pub struct TinyVec<const N: usize, T> {
-    inner: [MaybeUninit<T>; N],
     len: u8,
+    inner: [MaybeUninit<T>; N],
 }
 
 impl<const N: usize, T> Deref for TinyVec<N, T> {
@@ -103,7 +103,7 @@ impl<const N: usize, T> TinyVec<N, T> {
         self.len == 0
     }
 
-    /// Returns the maximum capacity of this vector. This is the same as `N`.
+    /// Returns the maximum capacity of this vector. This is `N` clamped up to 255.
     pub const fn capacity(&self) -> u8 {
         if N > u8::MAX as usize {
             u8::MAX
@@ -112,12 +112,12 @@ impl<const N: usize, T> TinyVec<N, T> {
         }
     }
 
-    /// Returns a slice containing the elements of this `TinyVec`.
+    /// Returns a slice over the elements of this `TinyVec`.
     pub fn as_slice(&self) -> &[T] {
         self
     }
 
-    /// Returns a mutable slice containing the elements of this `TinyVec`.
+    /// Returns a mutable slice over the elements of this `TinyVec`.
     pub fn as_mut_slice(&mut self) -> &mut [T] {
         self
     }
