@@ -1,3 +1,4 @@
+mod compact_vec;
 mod inline_string;
 mod inline_vec;
 mod macros;
@@ -7,6 +8,7 @@ mod time;
 mod tiny_string;
 mod tiny_vec;
 
+pub use compact_vec::*;
 pub use inline_string::*;
 pub use inline_vec::*;
 pub use macros::*;

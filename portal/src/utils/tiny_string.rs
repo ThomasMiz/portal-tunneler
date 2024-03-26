@@ -4,11 +4,9 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-/// A UTF-8–encoded, inline string of up to [`u8::MAX`] characters. Similar to [`InlineString`] in
-/// that it stores chars inline instead of allocating on the heap, but has a set capacity of 255
-/// and the length is an `u8` instead of an `usize`.
-///
-/// [`InlineString`]: crate::utils::InlineString
+/// A UTF-8–encoded, inline string of up to [`u8::MAX`] characters. Similar to
+/// [`InlineString`](super::InlineString) in that it stores chars inline instead of allocating on
+/// the heap, but has a set capacity of 255 and the length is an `u8` instead of an `usize`.
 pub struct TinyString {
     len: u8,
     inner: [MaybeUninit<u8>; u8::MAX as usize],
@@ -158,16 +156,15 @@ impl TinyString {
         ch_len
     }
 
-    /// Removes the last character from the string buffer and returns it.
-    ///
-    /// Returns [`None`] if this `TinyString` is empty.
+    /// Removes the last character from this `TinyString` and returns [`Some`] with it, or [`None`]
+    /// if the string was empty.
     pub fn pop(&mut self) -> Option<char> {
         let (new_len, ch) = self.char_indices().next_back()?;
         self.len = new_len as u8;
         Some(ch)
     }
 
-    /// Truncates this `TinyString`, removing all contents.
+    /// Clears this `TinyString`, removing all contents.
     pub fn clear(&mut self) {
         self.len = 0;
     }

@@ -100,16 +100,15 @@ impl<const N: usize> InlineString<N> {
         }
     }
 
-    /// Removes the last character from the string buffer and returns it.
-    ///
-    /// Returns [`None`] if this `InlineString` is empty.
+    /// Removes the last character from this `InlineString` and returns [`Some`] with it, or
+    /// [`None`] if the string was empty.
     pub fn pop(&mut self) -> Option<char> {
         let (new_len, ch) = self.char_indices().next_back()?;
         unsafe { self.inner.set_len(new_len) };
         Some(ch)
     }
 
-    /// Truncates this `InlineString`, removing all contents.
+    /// Clears this `InlineString`, removing all contents.
     pub fn clear(&mut self) {
         self.inner.clear();
     }

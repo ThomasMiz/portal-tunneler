@@ -22,7 +22,7 @@ impl<const N: usize, T> Deref for InlineVec<N, T> {
     type Target = [T];
 
     fn deref(&self) -> &Self::Target {
-        self.as_slice()
+        unsafe { std::mem::transmute(self.inner.get_unchecked(..self.len)) }
     }
 }
 
@@ -90,24 +90,30 @@ impl<const N: usize, T> InlineVec<N, T> {
         }
     }
 
-    /// Returns the number of elements in this vector.
+    /// Returns the number of elements in this `InlineVec`.
     pub const fn len(&self) -> usize {
         self.len
     }
 
-    /// Returns the maximum capacity of this vector. This is the same as `N`.
+    /// Returns the maximum capacity of this `InlineVec`. This is the same as `N`.
     pub const fn capacity(&self) -> usize {
         N
     }
 
+    /// Returns a slice containing the elements of this `InlineVec`.
     pub fn as_slice(&self) -> &[T] {
-        unsafe { std::mem::transmute(self.inner.get_unchecked(..self.len)) }
+        self
     }
 
-    /// Appends an element at the end of this vector.
+    /// Returns a mutable slice containing the elements of this `InlineVec`.
+    pub fn as_mut_slice(&mut self) -> &mut [T] {
+        self
+    }
+
+    /// Appends an element at the end of this `InlineVec`.
     ///
     /// Returns [`None`] if the element was appended, or [`Some`] with the passed element if the
-    /// vector is full.
+    /// `InlineVec` is full.
     pub fn push(&mut self, element: T) -> Option<T> {
         if self.len == N {
             Some(element)
@@ -120,11 +126,11 @@ impl<const N: usize, T> InlineVec<N, T> {
         }
     }
 
-    /// Inserts an element at position `index` within the vector, shifting all elements after it to
-    /// the right.
+    /// Inserts an element at position `index` within the `InlineVec`, shifting all elements after
+    /// it to the right.
     ///
     /// Returns [`None`] if the element was inserted, or [`Some`] with the passed element if the
-    /// vector is full.
+    /// `InlineVec` is full.
     ///
     /// # Panics
     ///
@@ -152,7 +158,8 @@ impl<const N: usize, T> InlineVec<N, T> {
         }
     }
 
-    /// Removes the last element from a vector and returns it, or [`None`] if it is empty.
+    /// Removes the last element from this `InlineVec` and returns [`Some`] with it, or [`None`] if
+    /// the vector was empty.
     pub fn pop(&mut self) -> Option<T> {
         if self.len == 0 {
             None
@@ -165,14 +172,12 @@ impl<const N: usize, T> InlineVec<N, T> {
         }
     }
 
-    /// Removes and returns the element at position `index` within the vector, shifting all
+    /// Removes and returns the element at position `index` within the `InlineVec`, shifting all
     /// elements after it to the left.
     ///
     /// Note: Because this shifts over the remaining elements, it has a worst-case performance of
-    /// *O*(*n*). If you don't need the order of elements to be preserved, use [`swap_remove`]
-    /// instead.
-    ///
-    /// [`swap_remove`]: InlineVec::swap_remove
+    /// *O*(*n*). If you don't need the order of elements to be preserved, use
+    /// [`swap_remove`](InlineVec::swap_remove) instead.
     ///
     /// # Panics
     ///
@@ -197,14 +202,11 @@ impl<const N: usize, T> InlineVec<N, T> {
         }
     }
 
-    /// Removes an element from the vector and returns it.
-    ///
-    /// The removed element is replaced by the last element of the vector.
+    /// Removes and returns the element at position `index` within the `InlineVec`, replacing it
+    /// with the last element of the vector.
     ///
     /// This does not preserve ordering of the remaining elements, but is *O*(1). If you need to
-    /// preserve the element order, use [`remove`] instead.
-    ///
-    /// [`remove`]: InlineVec::remove
+    /// preserve the element order, use [`remove`](InlineVec::remove) instead.
     ///
     /// # Panics
     ///
@@ -226,7 +228,7 @@ impl<const N: usize, T> InlineVec<N, T> {
         }
     }
 
-    /// Clears the vector, removing all values.
+    /// Clears this `InlineVec`, removing all values.
     pub fn clear(&mut self) {
         for i in 0..self.len {
             unsafe { self.inner.get_unchecked_mut(i).assume_init_drop() };
@@ -235,7 +237,7 @@ impl<const N: usize, T> InlineVec<N, T> {
         self.len = 0;
     }
 
-    /// Shortens the vector, keeping the first `new_len` elements and dropping the rest.
+    /// Shortens this `InlineVec`, keeping the first `new_len` elements and dropping the rest.
     ///
     /// If `new_len` is greater or equal to the vector's current length, this has no effect.
     pub fn truncate(&mut self, new_len: usize) {
@@ -248,16 +250,18 @@ impl<const N: usize, T> InlineVec<N, T> {
         }
     }
 
-    /// Forces the length of the vector to `new_len`. This operation is unsafe, and the caller is
-    /// responsible for ensuring this type's invariants are maintaned.
+    pub unsafe fn inner_buffer_mut(&mut self) -> &mut [MaybeUninit<T>; N] {
+        &mut self.inner
+    }
+
+    /// Forces the length of this `InlineVec` to `new_len`. This operation is unsafe, and the
+    /// caller is responsible for ensuring this type's invariants are maintaned.
     ///
     /// # Safety
     ///
-    /// - `new_len` must be less than or equal to [`capacity()`].
+    /// - `new_len` must be less than or equal to [`capacity`](InlineVec::capacity).
     /// - The elements in between the old and new lengths must be either initialized or dropped
     /// (depending on whether the vector is being expanded or truncated).
-    ///
-    /// [`capacity()`]: InlineVec::capacity
     pub unsafe fn set_len(&mut self, new_len: usize) {
         self.len = new_len;
     }

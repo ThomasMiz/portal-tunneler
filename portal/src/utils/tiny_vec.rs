@@ -153,7 +153,8 @@ impl<const N: usize, T> TinyVec<N, T> {
         }
     }
 
-    /// Removes the last element from a vector and returns it, or [`None`] if it is empty.
+    /// Removes the last element from this `TinyVec` and returns [`Some`] with it, or [`None`] if
+    /// the vector was empty.
     pub fn pop(&mut self) -> Option<T> {
         if self.len == 0 {
             None
@@ -170,10 +171,8 @@ impl<const N: usize, T> TinyVec<N, T> {
     /// elements after it to the left.
     ///
     /// Note: Because this shifts over the remaining elements, it has a worst-case performance of
-    /// *O*(*n*). If you don't need the order of elements to be preserved, use [`swap_remove`]
-    /// instead.
-    ///
-    /// [`swap_remove`]: TinyVec::swap_remove
+    /// *O*(*n*). If you don't need the order of elements to be preserved, use
+    /// [`swap_remove`](TinyVec::swap_remove) instead.
     ///
     /// # Panics
     ///
@@ -203,9 +202,7 @@ impl<const N: usize, T> TinyVec<N, T> {
     /// The removed element is replaced by the last element of the vector.
     ///
     /// This does not preserve ordering of the remaining elements, but is *O*(1). If you need to
-    /// preserve the element order, use [`remove`] instead.
-    ///
-    /// [`remove`]: TinyVec::remove
+    /// preserve the element order, use [`remove`](TinyVec::remove) instead.
     ///
     /// # Panics
     ///
@@ -227,7 +224,7 @@ impl<const N: usize, T> TinyVec<N, T> {
         }
     }
 
-    /// Clears the vector, removing all values.
+    /// Clears this `TinyVec`, removing all values.
     pub fn clear(&mut self) {
         for i in 0..(self.len as usize) {
             unsafe { self.inner.get_unchecked_mut(i).assume_init_drop() };
@@ -236,7 +233,7 @@ impl<const N: usize, T> TinyVec<N, T> {
         self.len = 0;
     }
 
-    /// Shortens the vector, keeping the first `new_len` elements and dropping the rest.
+    /// Shortens the `TinyVec`, keeping the first `new_len` elements and dropping the rest.
     ///
     /// If `new_len` is greater or equal to the vector's current length, this has no effect.
     pub fn truncate(&mut self, new_len: u8) {
@@ -249,16 +246,27 @@ impl<const N: usize, T> TinyVec<N, T> {
         }
     }
 
-    /// Forces the length of the vector to `new_len`. This operation is unsafe, and the caller is
-    /// responsible for ensuring this type's invariants are maintaned.
+    /// Gets a mutable reference to this `TinyVec`'s internal storage, which may be partly
+    /// uninitialized. This oepration is unsafe, and the caller is responsible for ensuring this
+    /// type's invariants are maintaned.
     ///
     /// # Safety
     ///
-    /// - `new_len` must be less than or equal to [`capacity()`].
+    /// - If the length of the vector is modified, it should be set with [`set_len`](TinyVec::set_len)
+    /// - There must be no uninitialized elements in the range 0..self.len()
+    /// - Any elements removed must be manually dropped by the caller
+    pub unsafe fn inner_buffer_mut(&mut self) -> &mut [MaybeUninit<T>; N] {
+        &mut self.inner
+    }
+
+    /// Forces the length of the `TinyVec` to `new_len`. This operation is unsafe, and the caller
+    /// is responsible for ensuring this type's invariants are maintaned.
+    ///
+    /// # Safety
+    ///
+    /// - `new_len` must be less than or equal to [`capacity`](TinyVec::capacity).
     /// - The elements in between the old and new lengths must be either initialized or dropped
     /// (depending on whether the vector is being expanded or truncated).
-    ///
-    /// [`capacity()`]: TinyVec::capacity
     pub unsafe fn set_len(&mut self, new_len: u8) {
         self.len = new_len;
     }
