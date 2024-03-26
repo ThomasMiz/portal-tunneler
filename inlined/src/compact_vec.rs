@@ -9,6 +9,8 @@ use super::{tiny_vec, TinyVec};
 
 /// A contiguous array of elements. Similar to [`Vec<T>`], but can store up to a constant `N`
 /// amount of elements inline before spilling over and allocating on the heap.
+///
+/// `N` should be strictly lower than 256.
 #[derive(Clone)]
 pub enum CompactVec<const N: usize, T> {
     Inlined(TinyVec<N, T>),
@@ -89,6 +91,13 @@ impl<const N: usize, T> CompactVec<N, T> {
         match self {
             Self::Inlined(tiny_vec) => tiny_vec.len() as usize,
             Self::Spilled(vec) => vec.len(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Self::Inlined(tiny_vec) => tiny_vec.is_empty(),
+            Self::Spilled(vec) => vec.is_empty(),
         }
     }
 

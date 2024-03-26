@@ -4,7 +4,7 @@ use std::{
     net::{IpAddr, SocketAddr, ToSocketAddrs},
 };
 
-use crate::utils::InlineString;
+use inlined::InlineString;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum SocketErrorType {

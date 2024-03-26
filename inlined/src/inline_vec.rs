@@ -95,6 +95,11 @@ impl<const N: usize, T> InlineVec<N, T> {
         self.len
     }
 
+    /// Returns `true` if this `InlineVec` contains no elements, and `false` otherwise.
+    pub const fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
     /// Returns the maximum capacity of this `InlineVec`. This is the same as `N`.
     pub const fn capacity(&self) -> usize {
         N
@@ -250,6 +255,15 @@ impl<const N: usize, T> InlineVec<N, T> {
         }
     }
 
+    /// Gets a mutable reference to this `InlineVec`'s internal storage, which may be partly
+    /// uninitialized. This operation is unsafe, and the caller is responsible for ensuring this
+    /// type's invariants are maintaned.
+    ///
+    /// # Safety
+    ///
+    /// - If the length of the vector is modified, it should be set with [`set_len`](InlineVec::set_len)
+    /// - There must be no uninitialized elements in the range 0..self.len()
+    /// - Any elements removed must be manually dropped by the caller
     pub unsafe fn inner_buffer_mut(&mut self) -> &mut [MaybeUninit<T>; N] {
         &mut self.inner
     }
@@ -385,7 +399,7 @@ impl<const N: usize, T> Drop for IntoIter<N, T> {
 mod tests {
     use std::{io::Write, ops::Deref};
 
-    use crate::utils::test_utils::DropChecker;
+    use crate::test_utils::DropChecker;
 
     use super::InlineVec;
 

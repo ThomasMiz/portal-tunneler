@@ -9,7 +9,7 @@ use std::{
 /// the heap, but has a set capacity of 255 and the length is an `u8` instead of an `usize`.
 pub struct TinyString {
     len: u8,
-    inner: [MaybeUninit<u8>; u8::MAX as usize],
+    inner: [MaybeUninit<u8>; 255],
 }
 
 impl Deref for TinyString {
@@ -98,6 +98,16 @@ impl TinyString {
     /// Returns the length of this `TinyString`, in bytes.
     pub const fn len(&self) -> u8 {
         self.len
+    }
+
+    /// Returns `true` if this `TinyString` has a length of zero, and `false` otherwise.
+    pub const fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    /// Returns a string slice with the contents of this `TinyString`.
+    pub fn as_str(&self) -> &str {
+        self
     }
 
     /// Appends a given string slice onto the end of this `TinyString`, returning how many bytes
@@ -190,7 +200,7 @@ impl TinyString {
     /// # Safety
     ///
     /// - The final contents of the buffer must be valid UTF-8.
-    pub unsafe fn as_mut_buffer(&mut self) -> &mut [MaybeUninit<u8>; u8::MAX as usize] {
+    pub unsafe fn as_mut_buffer(&mut self) -> &mut [MaybeUninit<u8>; 255] {
         &mut self.inner
     }
 

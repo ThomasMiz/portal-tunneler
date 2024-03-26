@@ -1,4 +1,4 @@
 [workspace]
 resolver = "2"
 
-members = ["portal", "portal-puncher-sm", "stdin-tunnel", "proxo"]
+members = ["portal", "portal-puncher-sm", "stdin-tunnel", "proxo", "inlined"]

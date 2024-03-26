@@ -5,12 +5,11 @@ use std::{
     num::NonZeroU16,
 };
 
+use inlined::InlineString;
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite},
     net::{TcpListener, TcpStream},
 };
-
-use crate::utils::InlineString;
 
 use super::serialize::{ByteRead, ByteWrite, SmallReadString, SmallWriteString};
 

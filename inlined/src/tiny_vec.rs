@@ -7,13 +7,15 @@ use std::{
 };
 
 /// A contiguous array of elements. Similar to [`Vec<T>`], but stores elements inline instead of
-/// allocating on the heap. Similar to [`InlineVec`](crate::utils::inline_vec::InlineVec), but has
+/// allocating on the heap. Similar to [`InlineVec`](super::InlineVec), but has
 /// an `u8` length instead of `usize`.
 ///
 /// This means this "vector" cannot store more than the constant `N` elements, and whether full or
 /// empty will always occupy as much memory as if it were full. The upside to this is that this
 /// memory is stored inline, so operations where a small vector is needed can be optimized with
 /// this type to make use of the stack, avoiding memory allocations and improving cache hits.
+///
+/// `N` should be strictly lower than 256.
 pub struct TinyVec<const N: usize, T> {
     inner: [MaybeUninit<T>; N],
     len: u8,
@@ -96,6 +98,11 @@ impl<const N: usize, T> TinyVec<N, T> {
         self.len
     }
 
+    /// Returns `true` if this `InlineVec` contains no elements, and `false` otherwise.
+    pub const fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
     /// Returns the maximum capacity of this vector. This is the same as `N`.
     pub const fn capacity(&self) -> u8 {
         if N > u8::MAX as usize {
@@ -103,6 +110,16 @@ impl<const N: usize, T> TinyVec<N, T> {
         } else {
             N as u8
         }
+    }
+
+    /// Returns a slice containing the elements of this `TinyVec`.
+    pub fn as_slice(&self) -> &[T] {
+        self
+    }
+
+    /// Returns a mutable slice containing the elements of this `TinyVec`.
+    pub fn as_mut_slice(&mut self) -> &mut [T] {
+        self
     }
 
     /// Appends an element at the end of this vector.
@@ -247,7 +264,7 @@ impl<const N: usize, T> TinyVec<N, T> {
     }
 
     /// Gets a mutable reference to this `TinyVec`'s internal storage, which may be partly
-    /// uninitialized. This oepration is unsafe, and the caller is responsible for ensuring this
+    /// uninitialized. This operation is unsafe, and the caller is responsible for ensuring this
     /// type's invariants are maintaned.
     ///
     /// # Safety
@@ -394,7 +411,7 @@ impl<const N: usize, T> Drop for IntoIter<N, T> {
 mod tests {
     use std::{io::Write, ops::Deref};
 
-    use crate::utils::test_utils::DropChecker;
+    use crate::test_utils::DropChecker;
 
     use super::TinyVec;
 

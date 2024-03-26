@@ -14,3 +14,4 @@ rustls = { version = "0.21.10", features = ["dangerous_configuration"] }
 rcgen = "0.12.1"
 base64 = { version = "0.22.0" }
 portal-puncher-sm = { path = "../portal-puncher-sm", version = "0.1.0" }
+inlined = { path = "../inlined", version = "0.1.0" }

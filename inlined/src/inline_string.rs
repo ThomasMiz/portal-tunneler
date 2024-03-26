@@ -19,7 +19,7 @@ impl<const N: usize> Deref for InlineString<N> {
     type Target = str;
 
     fn deref(&self) -> &Self::Target {
-        self.as_str()
+        unsafe { std::str::from_utf8_unchecked(self.inner.as_slice()) }
     }
 }
 
@@ -52,13 +52,19 @@ impl<const N: usize> InlineString<N> {
         self.inner.len()
     }
 
+    /// Returns `true` if this `InlineString` has a length of zero, and `false` otherwise.
+    pub const fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
     /// Returns this `InlineString`'s capacity, in bytes. This is the same as `N`.
     pub const fn capacity(&self) -> usize {
         self.inner.capacity()
     }
 
+    /// Returns a string slice with the contents of this `InlineString`.
     pub fn as_str(&self) -> &str {
-        unsafe { std::str::from_utf8_unchecked(self.inner.as_slice()) }
+        self
     }
 
     /// Appends a given string slice onto the end of this `InlineString`, returning how many bytes
