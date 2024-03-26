@@ -6,8 +6,8 @@
 //!
 //! For example, domain names are typically less than 100 characters and cannot be over 255.
 //! Instead of using [`String`], that allocates memory on the heap both on creation and on clone,
-//! you can use [`TinyString`], a 256-byte structure that can store up to 255 bytes using inline
-//! memory, and cloning is as simple as copying memory:
+//! you can use a [`TinyString::<255>`](TinyString), a 256-byte structure that can store up to 255
+//! bytes using inline memory, and cloning is as simple as copying memory:
 //!
 //! ```
 //! use inlined::TinyString;
@@ -31,8 +31,8 @@
 //! length instead of an `usize`. This makes them more optimal for passing around, or inlining them
 //! into other structs.
 //! - The [`CompactVec`] is a type that brings together [`Vec`] and [`TinyVec`], representing a
-//! vector that stores up to `N` elements inline with, but if more capacity is needed will spill
-//! into the heap and allocate memory.
+//! vector that stores up to `N` elements inline, but if more capacity is needed will spill into
+//! the heap and allocate memory.
 //!
 //! Since all of these implement [`Deref`](core::ops::Deref) for either `&[T]` or `&str`, they
 //! contain many of the methods you're used to having from [`Vec`] and [`String`].
