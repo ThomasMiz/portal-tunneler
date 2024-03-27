@@ -150,11 +150,8 @@ impl<const N: usize, T> InlineVec<N, T> {
         } else {
             unsafe {
                 if index != self.len {
-                    std::ptr::copy(
-                        self.inner.get_unchecked(index).as_ptr(),
-                        self.inner.get_unchecked_mut(index + 1).as_mut_ptr(),
-                        self.len - index,
-                    );
+                    let ptr = self.inner.as_mut_ptr().add(index);
+                    std::ptr::copy(ptr, ptr.add(1), self.len - index);
                 }
                 *self.inner.get_unchecked_mut(index) = MaybeUninit::new(element);
             }
@@ -197,11 +194,8 @@ impl<const N: usize, T> InlineVec<N, T> {
             self.len -= 1;
 
             if index != self.len {
-                std::ptr::copy(
-                    self.inner.get_unchecked(index + 1).as_ptr(),
-                    self.inner.get_unchecked_mut(index).as_mut_ptr(),
-                    self.len - index,
-                );
+                let ptr = self.inner.as_mut_ptr().add(index);
+                std::ptr::copy(ptr.add(1), ptr, self.len - index);
             }
             retval.assume_init()
         }
@@ -319,7 +313,8 @@ impl<const N: usize, T: Copy> InlineVec<N, T> {
 
         if count != 0 {
             unsafe {
-                std::ptr::copy_nonoverlapping(other.as_ptr(), self.inner.get_unchecked_mut(self.len).as_mut_ptr(), count);
+                let dst = std::mem::transmute(self.inner.as_mut_ptr().add(self.len));
+                std::ptr::copy_nonoverlapping(other.as_ptr(), dst, count);
                 self.len += count;
             }
         }

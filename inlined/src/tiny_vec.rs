@@ -157,11 +157,8 @@ impl<const N: usize, T> TinyVec<N, T> {
         } else {
             unsafe {
                 if index != self.len {
-                    std::ptr::copy(
-                        self.inner.get_unchecked(index as usize).as_ptr(),
-                        self.inner.get_unchecked_mut(index as usize + 1).as_mut_ptr(),
-                        (self.len - index) as usize,
-                    );
+                    let ptr = self.inner.as_mut_ptr().add(index as usize);
+                    std::ptr::copy(ptr, ptr.add(1), (self.len - index) as usize);
                 }
                 *self.inner.get_unchecked_mut(index as usize) = MaybeUninit::new(element);
             }
@@ -204,11 +201,8 @@ impl<const N: usize, T> TinyVec<N, T> {
             self.len -= 1;
 
             if index != self.len {
-                std::ptr::copy(
-                    self.inner.get_unchecked(index as usize + 1).as_ptr(),
-                    self.inner.get_unchecked_mut(index as usize).as_mut_ptr(),
-                    (self.len - index) as usize,
-                );
+                let ptr = self.inner.as_mut_ptr().add(index as usize);
+                std::ptr::copy(ptr.add(1), ptr, (self.len - index) as usize);
             }
             retval.assume_init()
         }
@@ -327,11 +321,8 @@ impl<const N: usize, T: Copy> TinyVec<N, T> {
 
         if count != 0 {
             unsafe {
-                std::ptr::copy_nonoverlapping(
-                    other.as_ptr(),
-                    self.inner.get_unchecked_mut(self.len as usize).as_mut_ptr(),
-                    count as usize,
-                );
+                let dst = std::mem::transmute(self.inner.as_mut_ptr().add(self.len as usize));
+                std::ptr::copy_nonoverlapping(other.as_ptr(), dst, count as usize);
                 self.len += count;
             }
         }

@@ -1,6 +1,6 @@
 [package]
 name = "inlined"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Types for inlining small collections for avoiding unnecessary heap allocations"
 license = "MIT OR Apache-2.0"
