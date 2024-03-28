@@ -1,5 +1,14 @@
 use std::ops::RangeBounds;
 
+/// Returns whether a string is a valid domain name, checking the string's length and characters.
+///
+/// This is not intended to be a fully correct implementation, but rather used to rule out strings
+/// that clearly do not follow the correct format. This method has false positives, but no false
+/// negatives.
+pub fn is_valid_domainname(s: &str) -> bool {
+    (1..256).contains(&s.len()) && s.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'.' || c == b'-')
+}
+
 /// Returns the same string, with all the characters outside the range stripped out.
 pub fn cut_string<R: RangeBounds<usize>>(mut s: String, range: R) -> String {
     let start_index = match range.start_bound() {

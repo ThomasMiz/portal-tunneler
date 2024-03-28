@@ -50,6 +50,7 @@ use std::{
     num::NonZeroU16,
 };
 
+use inlined::TinyString;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 /// Serializes a type into bytes, writing it to an [`AsyncWrite`] asynchronously.
@@ -468,6 +469,35 @@ impl ByteRead for SmallReadString {
         }
 
         Ok(SmallReadString(s))
+    }
+}
+
+impl<const N: usize> ByteWrite for TinyString<N> {
+    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), Error> {
+        writer.write_u8(self.len()).await?;
+        writer.write_all(self.as_bytes()).await
+    }
+}
+
+impl<const N: usize> ByteRead for TinyString<N> {
+    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, Error> {
+        let len = reader.read_u8().await?;
+        if len as usize > N {
+            return Err(Error::new(ErrorKind::InvalidData, "The tiny string is longer than allowed"));
+        }
+
+        let mut s = TinyString::new();
+        unsafe {
+            // SAFETY: The elements of `v` are initialized by `read_exact`, and then we ensure they are valid UTF-8.
+            let v = s.as_mut_vec();
+            v.set_len(len);
+            reader.read_exact(&mut v[..(len as usize)]).await?;
+            if std::str::from_utf8(v).is_err() {
+                return Err(Error::new(ErrorKind::InvalidData, "Tiny string is not valid UTF-8"));
+            }
+        }
+
+        Ok(s)
     }
 }
 

@@ -1,55 +1,27 @@
 use std::{
-    fmt::{self, Write},
-    io::{self, Error, ErrorKind},
+    fmt,
+    io::{Error, ErrorKind},
     net::{SocketAddr, SocketAddrV4, SocketAddrV6},
     num::NonZeroU16,
 };
 
-use inlined::InlineString;
-use tokio::{
-    io::{AsyncRead, AsyncReadExt, AsyncWrite},
-    net::{TcpListener, TcpStream},
-};
+use inlined::TinyString;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
 
-use super::serialize::{ByteRead, ByteWrite, SmallReadString, SmallWriteString};
+use super::serialize::{ByteRead, ByteWrite, SmallWriteString};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(clippy::large_enum_variant)]
 pub enum AddressOrDomainname {
     Address(SocketAddr),
-    Domainname(String, NonZeroU16),
+    Domainname(TinyString<255>, NonZeroU16),
 }
 
 impl AddressOrDomainname {
     pub fn as_ref(&self) -> AddressOrDomainnameRef {
         match self {
-            Self::Address(address) => AddressOrDomainnameRef::Address(address),
+            Self::Address(address) => AddressOrDomainnameRef::Address(*address),
             Self::Domainname(domainname, port) => AddressOrDomainnameRef::Domainname(domainname, *port),
-        }
-    }
-
-    // TODO: This code really shouldn't be here
-    pub async fn bind_listener(&self) -> io::Result<TcpListener> {
-        match self {
-            Self::Address(address) => TcpListener::bind(*address).await, // TODO: This should bind all the sockets the address yields!
-            Self::Domainname(domainname, port) => {
-                let mut s = InlineString::<262>::new();
-                let _ = write!(s, "{domainname}:{port}");
-
-                TcpListener::bind(s.as_str()).await
-            }
-        }
-    }
-
-    // TODO: This code really shouldn't be here
-    pub async fn bind_connect(&self) -> io::Result<TcpStream> {
-        match self {
-            Self::Address(address) => TcpStream::connect(*address).await,
-            Self::Domainname(domainname, port) => {
-                let mut s = InlineString::<262>::new();
-                let _ = write!(s, "{domainname}:{port}");
-
-                TcpStream::connect(s.as_str()).await
-            }
         }
     }
 }
@@ -62,7 +34,7 @@ impl fmt::Display for AddressOrDomainname {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AddressOrDomainnameRef<'a> {
-    Address(&'a SocketAddr),
+    Address(SocketAddr),
     Domainname(&'a str, NonZeroU16),
 }
 
@@ -97,7 +69,7 @@ impl ByteRead for AddressOrDomainname {
             4 => Ok(AddressOrDomainname::Address(SocketAddr::V4(SocketAddrV4::read(reader).await?))),
             6 => Ok(AddressOrDomainname::Address(SocketAddr::V6(SocketAddrV6::read(reader).await?))),
             200 => Ok(AddressOrDomainname::Domainname(
-                SmallReadString::read(reader).await?.0,
+                TinyString::read(reader).await?,
                 NonZeroU16::read(reader).await?,
             )),
             v => Err(Error::new(ErrorKind::InvalidData, format!("Invalid AddressOrDomainName type, {v}"))),

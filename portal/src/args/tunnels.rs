@@ -4,6 +4,8 @@ use std::{
     num::NonZeroU16,
 };
 
+use inlined::TinyString;
+
 use crate::{tunnel_proto::types::AddressOrDomainname, utils};
 
 /// Specifies an SSH-like TCP tunnel.
@@ -35,6 +37,7 @@ pub enum TunnelSide {
 
 /// Represents the possible targets to which a TCP tunnel can forward a TCP connection.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(clippy::large_enum_variant)]
 pub enum TunnelTarget {
     /// Forward to an address or domain name with port.
     Address(AddressOrDomainname),
@@ -131,7 +134,7 @@ fn parse_address_backwards(
 
     let address = match s.parse::<IpAddr>() {
         Ok(addr) => AddressOrDomainname::Address(SocketAddr::new(addr, port.get())),
-        Err(_) if utils::is_valid_domainname(s) => AddressOrDomainname::Domainname(String::from(s), port),
+        Err(_) if utils::is_valid_domainname(s) => AddressOrDomainname::Domainname(TinyString::from(s), port),
         Err(_) => {
             return Err(TunnelSpecErrorType::InvalidAddress(
                 arg,
@@ -176,7 +179,7 @@ where
                 index,
                 side,
                 target: TunnelTarget::Socks,
-                listen_address: AddressOrDomainname::Domainname(String::from("localhost"), last_port),
+                listen_address: AddressOrDomainname::Domainname(TinyString::from("localhost"), last_port),
             })
         }
     };
@@ -203,7 +206,7 @@ where
                 index,
                 side,
                 target: TunnelTarget::Address(target_address),
-                listen_address: AddressOrDomainname::Domainname(String::from("localhost"), first_port),
+                listen_address: AddressOrDomainname::Domainname(TinyString::from("localhost"), first_port),
             })
         }
     };

@@ -300,6 +300,22 @@ impl<const N: usize, T> Extend<T> for CompactVec<N, T> {
     }
 }
 
+impl<const N: usize, T> From<T> for CompactVec<N, T> {
+    fn from(value: T) -> Self {
+        let mut vec = CompactVec::new();
+        vec.push(value);
+        vec
+    }
+}
+
+impl<const N: usize, T> FromIterator<T> for CompactVec<N, T> {
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+        let mut vec = CompactVec::new();
+        vec.extend(iter);
+        vec
+    }
+}
+
 impl<const N: usize, T> IntoIterator for CompactVec<N, T> {
     type Item = T;
     type IntoIter = IntoIter<N, T>;

@@ -23,7 +23,7 @@ impl DropChecker {
         DC { tracker, value }
     }
 
-    pub fn track_named<T, S: ToString>(&mut self, name: S, value: T) -> DC<T> {
+    /*pub fn track_named<T, S: ToString>(&mut self, name: S, value: T) -> DC<T> {
         let tracker = Arc::new(DropCheckTracker {
             was_dropped: AtomicBool::new(false),
             name: Some(name.to_string()),
@@ -31,9 +31,9 @@ impl DropChecker {
 
         self.tracked.push(Arc::clone(&tracker));
         DC { tracker, value }
-    }
+    }*/
 
-    pub fn track_unnamed<T>(&mut self, value: T) -> DC<T> {
+    /*pub fn track_unnamed<T>(&mut self, value: T) -> DC<T> {
         let tracker = Arc::new(DropCheckTracker {
             was_dropped: AtomicBool::new(false),
             name: None,
@@ -41,7 +41,7 @@ impl DropChecker {
 
         self.tracked.push(Arc::clone(&tracker));
         DC { tracker, value }
-    }
+    }*/
 
     pub fn ensure_all_dropped(&mut self) {
         for t in self.tracked.drain(..) {

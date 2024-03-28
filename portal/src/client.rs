@@ -22,7 +22,7 @@ use crate::{
         responses::OpenConnectionError,
         serialize::{ByteRead, ByteWrite},
     },
-    utils::UNSPECIFIED_SOCKADDR_V4,
+    utils::{bind_connect, bind_listeners, UNSPECIFIED_SOCKADDR_V4},
 };
 
 pub async fn run_client(connection: Connection, tunnels: Vec<TunnelSpec>) -> io::Result<()> {
@@ -38,12 +38,16 @@ pub async fn run_client(connection: Connection, tunnels: Vec<TunnelSpec>) -> io:
             continue;
         }
 
-        match spec.listen_address.bind_listener().await {
-            Ok(listener) => {
-                let connection = Rc::clone(&connection);
-                tokio::task::spawn_local(async move {
-                    handle_local_tunnel_listening(connection, listener, spec).await;
-                });
+        match bind_listeners(spec.listen_address.as_ref()).await {
+            Ok(listeners) => {
+                let spec = Rc::new(spec);
+                for listener in listeners {
+                    let connection = Rc::clone(&connection);
+                    let spec = Rc::clone(&spec);
+                    tokio::task::spawn_local(async move {
+                        handle_local_tunnel_listening(connection, listener, spec).await;
+                    });
+                }
             }
             Err(error) => {
                 eprintln!("Couldn't open tunnel {}: {error}", spec.index);
@@ -127,9 +131,7 @@ async fn create_remote_tunnels(connection: &Connection, remote_tunnel_specs: Vec
     Ok(map)
 }
 
-async fn handle_local_tunnel_listening(connection: Rc<Connection>, listener: TcpListener, spec: TunnelSpec) {
-    let spec = Rc::new(spec);
-
+async fn handle_local_tunnel_listening(connection: Rc<Connection>, listener: TcpListener, spec: Rc<TunnelSpec>) {
     loop {
         let (tcp_stream, from) = match listener.accept().await {
             Ok(t) => t,
@@ -237,7 +239,7 @@ async fn handle_incoming_bi_stream(
     };
 
     println!("Connecting connection from remote tunnel to {address}");
-    let tcp_stream_result = address.bind_connect().await;
+    let tcp_stream_result = bind_connect(address.as_ref()).await;
 
     let response_result = tcp_stream_result
         .as_ref()

@@ -22,7 +22,7 @@ use crate::{
         responses::OpenConnectionError,
         serialize::{ByteRead, ByteWrite},
     },
-    utils::UNSPECIFIED_SOCKADDR_V4,
+    utils::{bind_connect, bind_listeners, UNSPECIFIED_SOCKADDR_V4},
 };
 
 pub async fn run_server(endpoint: Endpoint, abort_on_connect: Option<JoinHandle<()>>) {
@@ -98,7 +98,7 @@ async fn handle_open_local_tunnel_stream(mut send_stream: SendStream, mut recv_s
     let request = OpenLocalConnectionRequest::read(&mut recv_stream).await?;
     println!("Connecting connection from remote tunnel to {}", request.target);
 
-    let tcp_stream_result = request.target.bind_connect().await;
+    let tcp_stream_result = bind_connect(request.target.as_ref()).await;
 
     let response_result = tcp_stream_result
         .as_ref()
@@ -148,17 +148,19 @@ async fn handle_start_remote_tunnels_stream(
             Err(error) => return Err(error),
         };
 
-        let bind_result = request.listen_at.bind_listener().await;
+        let bind_result = bind_listeners(request.listen_at.as_ref()).await;
         let response = StartRemoteTunnelResponseRef::new(bind_result.as_ref().map(|_| ()));
         response.write(&mut send_stream).await?;
 
-        if let Ok(listener) = bind_result {
-            let connection = Rc::clone(&connection);
+        if let Ok(listeners) = bind_result {
             let tunnel_id = request.tunnel_id;
             let target_type = request.target_type;
-            tokio::task::spawn_local(async move {
-                handle_remote_tunnel_listening(connection, listener, tunnel_id, target_type).await;
-            });
+            for listener in listeners {
+                let connection = Rc::clone(&connection);
+                tokio::task::spawn_local(async move {
+                    handle_remote_tunnel_listening(connection, listener, tunnel_id, target_type).await;
+                });
+            }
         }
     }
 }
