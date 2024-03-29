@@ -4,16 +4,12 @@ use std::{
     rc::Rc,
 };
 
-use quinn::{Connection, ConnectionError, RecvStream, SendStream};
-use tokio::{
-    net::{TcpListener, TcpStream},
-    try_join,
-};
+use quinn::{Connection, RecvStream, SendStream};
+use tokio::try_join;
 
 use crate::{
-    args::{TunnelSide, TunnelSpec, TunnelTarget},
+    args::{TunnelSpec, TunnelTarget},
     tunnel_proto::{
-        local_tunnels::{OpenLocalConnectionRequestRef, OpenLocalConnectionResponse},
         remote_tunnels::{
             OpenRemoteConnectionRequest, OpenRemoteConnectionResponseRef, StartRemoteTunnelRequestRef, StartRemoteTunnelResponse,
             TunnelTargetType,
@@ -22,66 +18,10 @@ use crate::{
         responses::OpenConnectionError,
         serialize::{ByteRead, ByteWrite},
     },
-    utils::{bind_connect, bind_listeners, UNSPECIFIED_SOCKADDR_V4},
+    utils::{bind_connect, UNSPECIFIED_SOCKADDR_V4},
 };
 
-pub async fn run_client(connection: Connection, tunnels: Vec<TunnelSpec>) -> io::Result<()> {
-    println!("Client connected to {}", connection.remote_address());
-
-    let connection = Rc::new(connection);
-
-    let mut remote_tunnel_specs = Vec::new();
-
-    for spec in tunnels.into_iter() {
-        if spec.side == TunnelSide::Remote {
-            remote_tunnel_specs.push(spec);
-            continue;
-        }
-
-        match bind_listeners(spec.listen_address.as_ref()).await {
-            Ok(listeners) => {
-                let spec = Rc::new(spec);
-                for listener in listeners {
-                    let connection = Rc::clone(&connection);
-                    let spec = Rc::clone(&spec);
-                    tokio::task::spawn_local(async move {
-                        handle_local_tunnel_listening(connection, listener, spec).await;
-                    });
-                }
-            }
-            Err(error) => {
-                eprintln!("Couldn't open tunnel {}: {error}", spec.index);
-            }
-        }
-    }
-
-    let remote_tunnels = Rc::new(create_remote_tunnels(&connection, remote_tunnel_specs).await?);
-
-    let result_error = loop {
-        let (send_stream, recv_stream) = match connection.accept_bi().await {
-            Ok(t) => t,
-            Err(error) => break error,
-        };
-
-        let remote_tunnels = Rc::clone(&remote_tunnels);
-        tokio::task::spawn_local(async move {
-            match handle_incoming_bi_stream(send_stream, recv_stream, remote_tunnels).await {
-                Ok(()) => {}
-                Err(error) => println!("Handle incoming bidi stream task finished with error: {error}"),
-            }
-        });
-    };
-
-    match result_error {
-        ConnectionError::LocallyClosed => {}
-        ConnectionError::ApplicationClosed(_) => println!("The server closed the connection"),
-        error => eprintln!("The connection closed unexpectedly: {error}"),
-    };
-
-    Ok(())
-}
-
-async fn create_remote_tunnels(connection: &Connection, remote_tunnel_specs: Vec<TunnelSpec>) -> io::Result<HashMap<u32, TunnelSpec>> {
+pub async fn create_remote_tunnels(connection: &Connection, remote_tunnel_specs: Vec<TunnelSpec>) -> io::Result<HashMap<u32, TunnelSpec>> {
     if remote_tunnel_specs.is_empty() {
         return Ok(HashMap::new());
     }
@@ -131,74 +71,7 @@ async fn create_remote_tunnels(connection: &Connection, remote_tunnel_specs: Vec
     Ok(map)
 }
 
-async fn handle_local_tunnel_listening(connection: Rc<Connection>, listener: TcpListener, spec: Rc<TunnelSpec>) {
-    loop {
-        let (tcp_stream, from) = match listener.accept().await {
-            Ok(t) => t,
-            Err(error) => {
-                eprintln!("Error accepting new incoming connection: {error}");
-                continue;
-            }
-        };
-
-        print!("Incoming connection into tunnel {} from {from}, ", spec.index);
-        match &spec.target {
-            TunnelTarget::Socks => println!("waiting for SOCKS command"),
-            TunnelTarget::Address(address) => println!("tunneling towards {address}"),
-        };
-
-        let connection = Rc::clone(&connection);
-        let spec = Rc::clone(&spec);
-        tokio::task::spawn_local(async move {
-            match handle_local_tunnel(connection, tcp_stream, spec).await {
-                Ok(()) => {}
-                Err(error) => println!("Local tunnel task finished with error: {error}"),
-            }
-        });
-    }
-}
-
-async fn handle_local_tunnel(connection: Rc<Connection>, mut tcp_stream: TcpStream, spec: Rc<TunnelSpec>) -> io::Result<()> {
-    let (mut send_stream, mut recv_stream) = connection.open_bi().await?;
-    ClientStreamRequest::OpenLocalTunnelConnection.write(&mut send_stream).await?;
-
-    let request = match &spec.target {
-        TunnelTarget::Socks => unimplemented!("TODO: Implement SOCKS protocol"),
-        TunnelTarget::Address(address) => OpenLocalConnectionRequestRef::new(address.as_ref()),
-    };
-
-    request.write(&mut send_stream).await?;
-
-    let response = OpenLocalConnectionResponse::read(&mut recv_stream).await?;
-    let bind_address = match response.result {
-        Ok(address) => address,
-        Err((start_error, error)) => {
-            eprintln!("Failed to connect local tunnel, server responded with {start_error} failure: {error}");
-            return Err(error);
-        }
-    };
-
-    println!("Local tunnel connected through server (remote socket bound at {bind_address})");
-
-    let (mut read_half, mut write_half) = tcp_stream.split();
-    let result = try_join!(
-        tokio::io::copy(&mut read_half, &mut send_stream),
-        tokio::io::copy(&mut recv_stream, &mut write_half),
-    );
-
-    match result {
-        Ok((sent, received)) => {
-            println!("Local tunnel ended after {sent} bytes sent and {received} bytes received");
-            Ok(())
-        }
-        Err(error) => {
-            eprintln!("Local tunnel ended with error: {error}");
-            Err(error)
-        }
-    }
-}
-
-async fn handle_incoming_bi_stream(
+pub async fn handle_incoming_bi_stream(
     mut send_stream: SendStream,
     mut recv_stream: RecvStream,
     remote_tunnels: Rc<HashMap<u32, TunnelSpec>>,

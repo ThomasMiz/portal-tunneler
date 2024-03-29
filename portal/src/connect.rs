@@ -1,7 +1,7 @@
 use std::{
     future::{poll_fn, Future},
     io::{self, Error, ErrorKind, Write},
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
+    net::{IpAddr, Ipv4Addr, SocketAddr},
     num::NonZeroU16,
     pin::Pin,
     task::Poll,
@@ -23,6 +23,7 @@ use crate::{
         socket_binder::bind_sockets,
         PunchConnectResult,
     },
+    utils::{UNSPECIFIED_SOCKADDR_V4, UNSPECIFIED_SOCKADDR_V6},
 };
 
 pub async fn punch(punch_config: PunchConfig, is_server: bool) -> io::Result<PunchConnectResult> {
@@ -103,7 +104,7 @@ pub async fn connect_client(connect_method: ConnectMethod) -> io::Result<(Endpoi
             let ipv4_endpoint = match addresses.iter().any(|a| a.is_ipv4()) {
                 false => None,
                 true => {
-                    let bind_address = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0));
+                    let bind_address = UNSPECIFIED_SOCKADDR_V4;
                     let result = std::net::UdpSocket::bind(bind_address)
                         .and_then(|socket| make_endpoint(EndpointSocketSource::Simple(socket), true, false));
 
@@ -117,10 +118,10 @@ pub async fn connect_client(connect_method: ConnectMethod) -> io::Result<(Endpoi
                 }
             };
 
-            let ipv6_endpoint = match addresses.iter().any(|a| a.is_ipv4()) {
+            let ipv6_endpoint = match addresses.iter().any(|a| a.is_ipv6()) {
                 false => None,
                 true => {
-                    let bind_address = SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, 0, 0, 0));
+                    let bind_address = UNSPECIFIED_SOCKADDR_V6;
                     let result = std::net::UdpSocket::bind(bind_address)
                         .and_then(|socket| make_endpoint(EndpointSocketSource::Simple(socket), true, false));
 
@@ -135,6 +136,7 @@ pub async fn connect_client(connect_method: ConnectMethod) -> io::Result<(Endpoi
             };
 
             let mut connect_futures = Vec::new();
+            connect_futures.reserve_exact(addresses.len());
 
             for address in addresses {
                 let maybe_endpoint = match address {
@@ -144,7 +146,7 @@ pub async fn connect_client(connect_method: ConnectMethod) -> io::Result<(Endpoi
 
                 let endpoint = match maybe_endpoint {
                     Some(endpoint) => endpoint,
-                    None => continue,
+                    None => unreachable!(),
                 };
 
                 match endpoint.connect(address, "localhost") {

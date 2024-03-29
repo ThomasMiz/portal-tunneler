@@ -69,7 +69,7 @@ async fn async_main(startup_args: StartupArguments) -> Result<(), Error> {
     match startup_args.startup_mode {
         StartupMode::Client(client_config) => {
             let (endpoint, connection) = connect_client(startup_args.connect_method).await?;
-            match client::run_client(connection, client_config.tunnels).await {
+            match client::run::run_client(connection, client_config).await {
                 Ok(()) => {}
                 Err(error) => eprintln!("Client finished with error: {error}"),
             }
@@ -81,7 +81,7 @@ async fn async_main(startup_args: StartupArguments) -> Result<(), Error> {
             for endpoint in endpoints {
                 let maybe_handle = maybe_handle.take();
                 let handle = tokio::task::spawn_local(async move {
-                    server::run_server(endpoint, maybe_handle).await;
+                    server::run::run_server(endpoint, maybe_handle).await;
                 });
 
                 handles.push(handle);
