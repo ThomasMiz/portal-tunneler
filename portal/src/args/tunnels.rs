@@ -4,47 +4,12 @@ use std::{
     num::NonZeroU16,
 };
 
-use inlined::TinyString;
+use portal_tunneler_proto::shared::{
+    address_or_domainname::AddressOrDomainname,
+    tunnels::{TunnelSide, TunnelSpec, TunnelTarget},
+};
 
-use crate::{tunnel_proto::types::AddressOrDomainname, utils};
-
-/// Specifies an SSH-like TCP tunnel.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TunnelSpec {
-    /// The order in which the tunnel specifications were specified by parameters. This starts at
-    /// zero and increments sequentially. This is used for printing error messages.
-    pub index: usize,
-
-    /// The side which will listen for incoming TCP connections.
-    pub side: TunnelSide,
-
-    /// The target to which the TCP connections will be forwarded to on the other side.
-    pub target: TunnelTarget,
-
-    /// The address or addresses to listen for incoming TCP connection at.
-    pub listen_address: AddressOrDomainname,
-}
-
-/// Represents the possible sides for a tunnel.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TunnelSide {
-    /// We locally listen for incoming connections and forward them to the remote.
-    Local,
-
-    /// The remote listens for incoming connections and forwards them to us.
-    Remote,
-}
-
-/// Represents the possible targets to which a TCP tunnel can forward a TCP connection.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(clippy::large_enum_variant)]
-pub enum TunnelTarget {
-    /// Forward to an address or domain name with port.
-    Address(AddressOrDomainname),
-
-    /// Forward to wherever the connection specifies using the SOCKS proxy protocol.
-    Socks,
-}
+use crate::utils;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum TunnelSpecErrorType {
@@ -134,7 +99,7 @@ fn parse_address_backwards(
 
     let address = match s.parse::<IpAddr>() {
         Ok(addr) => AddressOrDomainname::Address(SocketAddr::new(addr, port.get())),
-        Err(_) if utils::is_valid_domainname(s) => AddressOrDomainname::Domainname(TinyString::from(s), port),
+        Err(_) if utils::is_valid_domainname(s) => AddressOrDomainname::Domainname(String::from(s), port),
         Err(_) => {
             return Err(TunnelSpecErrorType::InvalidAddress(
                 arg,
@@ -179,7 +144,7 @@ where
                 index,
                 side,
                 target: TunnelTarget::Socks,
-                listen_address: AddressOrDomainname::Domainname(TinyString::from("localhost"), last_port),
+                listen_address: AddressOrDomainname::Domainname(String::from("localhost"), last_port),
             })
         }
     };
@@ -206,7 +171,7 @@ where
                 index,
                 side,
                 target: TunnelTarget::Address(target_address),
-                listen_address: AddressOrDomainname::Domainname(TinyString::from("localhost"), first_port),
+                listen_address: AddressOrDomainname::Domainname(String::from("localhost"), first_port),
             })
         }
     };

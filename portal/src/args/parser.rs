@@ -3,10 +3,12 @@ use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
 };
 
+use portal_tunneler_proto::shared::tunnels::TunnelSide;
+
 use super::{
     parse_ip_addr_arg, parse_lane_count_arg, parse_port_number_arg, parse_socket_arg, parse_tunnel_spec_arg, ArgumentsRequest,
     ConnectMethod, IpAddrErrorType, LaneCountErrorType, PortErrorType, PunchConfig, SocketErrorType, StartClientConfig, StartServerConfig,
-    StartupArguments, StartupMode, TunnelSide, TunnelSpecErrorType, DEFAULT_PORT,
+    StartupArguments, StartupMode, TunnelSpecErrorType, DEFAULT_PORT,
 };
 
 #[derive(Debug, PartialEq, Eq)]

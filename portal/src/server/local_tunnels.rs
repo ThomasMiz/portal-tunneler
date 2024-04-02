@@ -1,5 +1,6 @@
 use std::io;
 
+use portal_tunneler_proto::serialize::{ByteRead, ByteWrite};
 use quinn::{RecvStream, SendStream};
 use tokio::try_join;
 
@@ -7,7 +8,6 @@ use crate::{
     tunnel_proto::{
         local_tunnels::{OpenLocalConnectionRequest, OpenLocalConnectionResponseRef},
         responses::OpenConnectionError,
-        serialize::{ByteRead, ByteWrite},
     },
     utils::{bind_connect, UNSPECIFIED_SOCKADDR_V4},
 };

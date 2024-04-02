@@ -1,3 +1,5 @@
+#![feature(extract_if)] // TODO: Remove once API is stabilized
+
 use std::{
     env,
     future::{poll_fn, Future},

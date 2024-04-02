@@ -7,9 +7,8 @@ use std::{
 };
 
 use inlined::{CompactVec, InlineString};
+use portal_tunneler_proto::shared::address_or_domainname::AddressOrDomainnameRef;
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
-
-use crate::tunnel_proto::types::AddressOrDomainnameRef;
 
 /// An empty IPv4 [`SocketAddr`] with port 0
 pub const UNSPECIFIED_SOCKADDR_V4: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0));

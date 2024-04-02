@@ -1,14 +1,10 @@
 use std::{
     fmt,
-    io::{Error, ErrorKind},
+    io::{self, Error, ErrorKind},
 };
 
-use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
-
-use super::{
-    serialize::{ByteRead, ByteWrite},
-    u8_repr_enum::U8ReprEnum,
-};
+use portal_tunneler_proto::serialize::{ByteRead, ByteWrite, U8ReprEnum};
+use tokio::io::{AsyncRead, AsyncWrite};
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,16 +40,16 @@ impl U8ReprEnum for OpenConnectionError {
 }
 
 impl ByteWrite for OpenConnectionError {
-    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> Result<(), Error> {
-        writer.write_u8(self.into_u8()).await
+    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> io::Result<()> {
+        self.into_u8().write(writer).await
     }
 }
 
 impl ByteRead for OpenConnectionError {
-    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> Result<Self, Error> {
+    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> io::Result<Self> {
         match Self::from_u8(u8::read(reader).await?) {
             Some(role) => Ok(role),
-            None => Err(Error::new(ErrorKind::InvalidData, "Invalid StartConnectionError type byte")),
+            None => Err(Error::new(ErrorKind::InvalidData, "Invalid OpenConnectionError type byte")),
         }
     }
 }

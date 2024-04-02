@@ -3,6 +3,10 @@ use std::{
     rc::Rc,
 };
 
+use portal_tunneler_proto::{
+    serialize::{ByteRead, ByteWrite},
+    shared::tunnels::{RemoteTunnelID, TunnelTargetType},
+};
 use quinn::{Connection, RecvStream, SendStream};
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -10,12 +14,8 @@ use tokio::{
 };
 
 use crate::{
-    tunnel_proto::{
-        remote_tunnels::{
-            OpenRemoteConnectionRequestRef, OpenRemoteConnectionResponse, StartRemoteTunnelRequest, StartRemoteTunnelResponseRef,
-            TunnelTargetType,
-        },
-        serialize::{ByteRead, ByteWrite},
+    tunnel_proto::remote_tunnels::{
+        OpenRemoteConnectionRequestRef, OpenRemoteConnectionResponse, StartRemoteTunnelRequest, StartRemoteTunnelResponseRef,
     },
     utils::bind_listeners,
 };
@@ -52,7 +52,7 @@ pub async fn handle_start_remote_tunnels_stream(
 pub async fn handle_remote_tunnel_listening(
     connection: Rc<Connection>,
     listener: TcpListener,
-    tunnel_id: u32,
+    tunnel_id: RemoteTunnelID,
     target_type: TunnelTargetType,
 ) {
     loop {
@@ -77,7 +77,7 @@ pub async fn handle_remote_tunnel_listening(
 pub async fn handle_remote_tunnel(
     connection: Rc<Connection>,
     mut tcp_stream: TcpStream,
-    tunnel_id: u32,
+    tunnel_id: RemoteTunnelID,
     target_type: TunnelTargetType,
 ) -> io::Result<()> {
     let (mut send_stream, mut recv_stream) = match connection.open_bi().await {

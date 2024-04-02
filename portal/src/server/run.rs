@@ -1,12 +1,13 @@
 use std::{io, rc::Rc};
 
+use portal_tunneler_proto::serialize::ByteRead;
 use quinn::{Connecting, Connection, Endpoint, RecvStream, SendStream, VarInt};
 use tokio::{
     select,
     task::{AbortHandle, JoinHandle},
 };
 
-use crate::tunnel_proto::{requests::ClientStreamRequest, serialize::ByteRead};
+use crate::tunnel_proto::requests::ClientStreamRequest;
 
 use super::{local_tunnels::handle_open_local_tunnel_stream, remote_tunnels::handle_start_remote_tunnels_stream};
 

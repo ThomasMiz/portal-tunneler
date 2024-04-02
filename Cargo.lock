@@ -272,6 +272,7 @@ dependencies = [
  "base64 0.22.0",
  "inlined",
  "portal-puncher-sm",
+ "portal-tunneler-proto",
  "quinn",
  "quinn-udp",
  "rcgen",
@@ -282,6 +283,14 @@ dependencies = [
 [[package]]
 name = "portal-puncher-sm"
 version = "0.1.0"
+
+[[package]]
+name = "portal-tunneler-proto"
+version = "0.1.0"
+dependencies = [
+ "quinn",
+ "tokio",
+]
 
 [[package]]
 name = "powerfmt"

@@ -1,9 +1,10 @@
 use std::{io, rc::Rc};
 
+use portal_tunneler_proto::shared::tunnels::TunnelSide;
 use quinn::{Connection, ConnectionError};
 
 use crate::{
-    args::{StartClientConfig, TunnelSide},
+    args::StartClientConfig,
     client::{
         local_tunnels::handle_local_tunnel_listening,
         remote_tunnels::{create_remote_tunnels, handle_incoming_bi_stream},
@@ -15,15 +16,9 @@ pub async fn run_client(connection: Connection, config: StartClientConfig) -> io
     println!("Client connected to {}", connection.remote_address());
 
     let connection = Rc::new(connection);
+    let mut tunnels = config.tunnels;
 
-    let mut remote_tunnel_specs = Vec::new();
-
-    for spec in config.tunnels.into_iter() {
-        if spec.side == TunnelSide::Remote {
-            remote_tunnel_specs.push(spec);
-            continue;
-        }
-
+    for spec in tunnels.extract_if(|spec| spec.side == TunnelSide::Local) {
         match bind_listeners(spec.listen_address.as_ref()).await {
             Ok(listeners) => {
                 let spec = Rc::new(spec);
@@ -41,7 +36,7 @@ pub async fn run_client(connection: Connection, config: StartClientConfig) -> io
         }
     }
 
-    let remote_tunnels = Rc::new(create_remote_tunnels(&connection, remote_tunnel_specs).await?);
+    let remote_tunnels = Rc::new(create_remote_tunnels(&connection, tunnels).await?);
 
     let result_error = loop {
         let (send_stream, recv_stream) = match connection.accept_bi().await {

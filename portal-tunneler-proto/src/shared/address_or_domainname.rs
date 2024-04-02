@@ -5,16 +5,14 @@ use std::{
     num::NonZeroU16,
 };
 
-use inlined::TinyString;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};
 
-use super::serialize::{ByteRead, ByteWrite, SmallWriteString};
+use crate::serialize::{ByteRead, ByteWrite, SmallReadString, SmallWriteString};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(clippy::large_enum_variant)]
 pub enum AddressOrDomainname {
     Address(SocketAddr),
-    Domainname(TinyString<255>, NonZeroU16),
+    Domainname(String, NonZeroU16),
 }
 
 impl AddressOrDomainname {
@@ -69,7 +67,7 @@ impl ByteRead for AddressOrDomainname {
             4 => Ok(AddressOrDomainname::Address(SocketAddr::V4(SocketAddrV4::read(reader).await?))),
             6 => Ok(AddressOrDomainname::Address(SocketAddr::V6(SocketAddrV6::read(reader).await?))),
             200 => Ok(AddressOrDomainname::Domainname(
-                TinyString::read(reader).await?,
+                SmallReadString::read(reader).await?.0,
                 NonZeroU16::read(reader).await?,
             )),
             v => Err(Error::new(ErrorKind::InvalidData, format!("Invalid AddressOrDomainName type, {v}"))),

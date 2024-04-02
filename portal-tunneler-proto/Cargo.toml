@@ -1,0 +1,8 @@
+[package]
+name = "portal-tunneler-proto"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1.36.0", features = ["full"] }
+quinn = { version = "0.10.2", features = ["tls-rustls"] }

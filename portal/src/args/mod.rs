@@ -10,6 +10,7 @@ mod tunnels;
 
 pub use addresses::*;
 pub use parser::*;
+use portal_tunneler_proto::shared::tunnels::TunnelSpec;
 pub use ports::*;
 pub use tunnels::*;
 
