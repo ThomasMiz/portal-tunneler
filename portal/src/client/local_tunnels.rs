@@ -2,17 +2,12 @@ use std::{io, rc::Rc};
 
 use portal_tunneler_proto::{
     serialize::{ByteRead, ByteWrite},
-    shared::tunnels::{TunnelSpec, TunnelTarget},
+    shared::{ClientStreamRequest, OpenLocalConnectionRequestRef, OpenLocalConnectionResponse, TunnelSpec, TunnelTarget},
 };
 use quinn::Connection;
 use tokio::{
     net::{TcpListener, TcpStream},
     try_join,
-};
-
-use crate::tunnel_proto::{
-    local_tunnels::{OpenLocalConnectionRequestRef, OpenLocalConnectionResponse},
-    requests::ClientStreamRequest,
 };
 
 pub async fn handle_local_tunnel_listening(connection: Rc<Connection>, listener: TcpListener, spec: Rc<TunnelSpec>) {

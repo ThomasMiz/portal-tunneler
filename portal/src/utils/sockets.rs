@@ -7,7 +7,7 @@ use std::{
 };
 
 use inlined::{CompactVec, InlineString};
-use portal_tunneler_proto::shared::address_or_domainname::AddressOrDomainnameRef;
+use portal_tunneler_proto::shared::AddressOrDomainnameRef;
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
 
 /// An empty IPv4 [`SocketAddr`] with port 0

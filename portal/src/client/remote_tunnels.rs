@@ -6,21 +6,15 @@ use std::{
 
 use portal_tunneler_proto::{
     serialize::{ByteRead, ByteWrite},
-    shared::tunnels::{RemoteTunnelID, TunnelSpec, TunnelTarget, TunnelTargetType},
+    shared::{
+        ClientStreamRequest, OpenConnectionError, OpenRemoteConnectionRequest, OpenRemoteConnectionResponseRef, RemoteTunnelID,
+        StartRemoteTunnelRequestRef, StartRemoteTunnelResponse, TunnelSpec, TunnelTarget, TunnelTargetType,
+    },
 };
 use quinn::{Connection, RecvStream, SendStream};
 use tokio::try_join;
 
-use crate::{
-    tunnel_proto::{
-        remote_tunnels::{
-            OpenRemoteConnectionRequest, OpenRemoteConnectionResponseRef, StartRemoteTunnelRequestRef, StartRemoteTunnelResponse,
-        },
-        requests::ClientStreamRequest,
-        responses::OpenConnectionError,
-    },
-    utils::{bind_connect, UNSPECIFIED_SOCKADDR_V4},
-};
+use crate::utils::{bind_connect, UNSPECIFIED_SOCKADDR_V4};
 
 pub async fn create_remote_tunnels(
     connection: &Connection,

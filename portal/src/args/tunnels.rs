@@ -4,10 +4,7 @@ use std::{
     num::NonZeroU16,
 };
 
-use portal_tunneler_proto::shared::{
-    address_or_domainname::AddressOrDomainname,
-    tunnels::{TunnelSide, TunnelSpec, TunnelTarget},
-};
+use portal_tunneler_proto::shared::{AddressOrDomainname, TunnelSide, TunnelSpec, TunnelTarget};
 
 use crate::utils;
 

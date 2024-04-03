@@ -2,7 +2,7 @@ use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use quinn::Connection;
 
-use crate::shared::tunnels::{RemoteTunnelID, TunnelSpec};
+use crate::shared::{RemoteTunnelID, TunnelSpec};
 
 /// Stores information about the client's current state.
 pub struct ClientState {

@@ -1,3 +1,5 @@
+// TODO: Move all this documentation to the separate proto project.
+
 //! This module describes the lightweight protocol built on top of QUIC for creating tunnels.
 //!
 //! The protocol makes use of bidirectional streams. It is important to note that all protocols
@@ -101,7 +103,4 @@
 /// Note: This is currently the only version of the protocol.
 pub const PROTOCOL_VERSION: u16 = 1;
 
-pub mod local_tunnels;
-pub mod remote_tunnels;
-pub mod requests;
-pub mod responses;
+// TODO: Actually implement some mechanism of version negotiation

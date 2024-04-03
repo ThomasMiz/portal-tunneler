@@ -1,16 +1,13 @@
 use std::io;
 
-use portal_tunneler_proto::serialize::{ByteRead, ByteWrite};
+use portal_tunneler_proto::{
+    serialize::{ByteRead, ByteWrite},
+    shared::{OpenConnectionError, OpenLocalConnectionRequest, OpenLocalConnectionResponseRef},
+};
 use quinn::{RecvStream, SendStream};
 use tokio::try_join;
 
-use crate::{
-    tunnel_proto::{
-        local_tunnels::{OpenLocalConnectionRequest, OpenLocalConnectionResponseRef},
-        responses::OpenConnectionError,
-    },
-    utils::{bind_connect, UNSPECIFIED_SOCKADDR_V4},
-};
+use crate::utils::{bind_connect, UNSPECIFIED_SOCKADDR_V4};
 
 pub async fn handle_open_local_tunnel_stream(mut send_stream: SendStream, mut recv_stream: RecvStream) -> io::Result<()> {
     println!("Incoming connection from on tunnel");

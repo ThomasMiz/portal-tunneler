@@ -3,7 +3,7 @@ use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
 };
 
-use portal_tunneler_proto::shared::tunnels::TunnelSide;
+use portal_tunneler_proto::shared::TunnelSide;
 
 use super::{
     parse_ip_addr_arg, parse_lane_count_arg, parse_port_number_arg, parse_socket_arg, parse_tunnel_spec_arg, ArgumentsRequest,

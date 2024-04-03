@@ -1,12 +1,10 @@
 use std::{io::Error, net::SocketAddr};
 
-use portal_tunneler_proto::{
+use crate::{
     serialize::{ByteRead, ByteWrite},
-    shared::address_or_domainname::{AddressOrDomainname, AddressOrDomainnameRef},
+    shared::{AddressOrDomainname, AddressOrDomainnameRef, OpenConnectionError},
 };
 use tokio::io::{AsyncRead, AsyncWrite};
-
-use super::responses::OpenConnectionError;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpenLocalConnectionRequest {

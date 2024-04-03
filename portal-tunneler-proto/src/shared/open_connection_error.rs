@@ -3,7 +3,7 @@ use std::{
     io::{self, Error, ErrorKind},
 };
 
-use portal_tunneler_proto::serialize::{ByteRead, ByteWrite, U8ReprEnum};
+use crate::serialize::{ByteRead, ByteWrite, U8ReprEnum};
 use tokio::io::{AsyncRead, AsyncWrite};
 
 #[repr(u8)]

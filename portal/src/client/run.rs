@@ -1,6 +1,6 @@
 use std::{io, rc::Rc};
 
-use portal_tunneler_proto::shared::tunnels::TunnelSide;
+use portal_tunneler_proto::shared::TunnelSide;
 use quinn::{Connection, ConnectionError};
 
 use crate::{
