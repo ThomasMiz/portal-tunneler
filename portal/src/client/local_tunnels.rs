@@ -1,16 +1,17 @@
 use std::{io, rc::Rc};
 
 use portal_tunneler_proto::{
+    client::ClientState,
     serialize::{ByteRead, ByteWrite},
     shared::{ClientStreamRequest, OpenLocalConnectionRequestRef, OpenLocalConnectionResponse, TunnelSpec, TunnelTarget},
 };
-use quinn::Connection;
+
 use tokio::{
     net::{TcpListener, TcpStream},
     try_join,
 };
 
-pub async fn handle_local_tunnel_listening(connection: Rc<Connection>, listener: TcpListener, spec: Rc<TunnelSpec>) {
+pub async fn handle_local_tunnel_listening(client: Rc<ClientState>, listener: TcpListener, spec: Rc<TunnelSpec>) {
     loop {
         let (tcp_stream, from) = match listener.accept().await {
             Ok(t) => t,
@@ -26,10 +27,10 @@ pub async fn handle_local_tunnel_listening(connection: Rc<Connection>, listener:
             TunnelTarget::Address(address) => println!("tunneling towards {address}"),
         };
 
-        let connection = Rc::clone(&connection);
+        let client = Rc::clone(&client);
         let spec = Rc::clone(&spec);
         tokio::task::spawn_local(async move {
-            match handle_local_tunnel(connection, tcp_stream, spec).await {
+            match handle_local_tunnel(client, tcp_stream, spec).await {
                 Ok(()) => {}
                 Err(error) => println!("Local tunnel task finished with error: {error}"),
             }
@@ -37,8 +38,8 @@ pub async fn handle_local_tunnel_listening(connection: Rc<Connection>, listener:
     }
 }
 
-pub async fn handle_local_tunnel(connection: Rc<Connection>, mut tcp_stream: TcpStream, spec: Rc<TunnelSpec>) -> io::Result<()> {
-    let (mut send_stream, mut recv_stream) = connection.open_bi().await?;
+pub async fn handle_local_tunnel(client: Rc<ClientState>, mut tcp_stream: TcpStream, spec: Rc<TunnelSpec>) -> io::Result<()> {
+    let (mut send_stream, mut recv_stream) = client.connection().open_bi().await?;
     ClientStreamRequest::OpenLocalTunnelConnection.write(&mut send_stream).await?;
 
     let request = match &spec.target {

@@ -1,4 +1,8 @@
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::{
+    cell::{RefCell, RefMut},
+    collections::HashMap,
+    rc::Rc,
+};
 
 use quinn::Connection;
 
@@ -6,8 +10,8 @@ use crate::shared::{RemoteTunnelID, TunnelSpec};
 
 /// Stores information about the client's current state.
 pub struct ClientState {
-    pub connection: Connection,
-    pub inner: RefCell<ClientStateInner>,
+    connection: Connection,
+    inner: RefCell<ClientStateInner>,
 }
 
 impl ClientState {
@@ -17,6 +21,15 @@ impl ClientState {
             connection,
             inner: RefCell::new(ClientStateInner::new()),
         }
+    }
+
+    pub fn lock(&self) -> RefMut<'_, ClientStateInner> {
+        self.inner.borrow_mut()
+    }
+
+    /// Gets the QUIC connection used by this client.
+    pub fn connection(&self) -> &Connection {
+        &self.connection
     }
 }
 

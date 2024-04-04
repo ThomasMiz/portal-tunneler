@@ -64,7 +64,7 @@ pub async fn accept_from_any(listeners: &[TcpListener]) -> (usize, io::Result<(T
     }
 }
 
-pub async fn bind_listeners<'a>(address: AddressOrDomainnameRef<'a>) -> io::Result<CompactVec<3, TcpListener>> {
+pub async fn bind_listeners(address: AddressOrDomainnameRef<'_>) -> io::Result<CompactVec<3, TcpListener>> {
     match address {
         AddressOrDomainnameRef::Address(address) => Ok(CompactVec::from(TcpListener::bind(address).await?)),
         AddressOrDomainnameRef::Domainname(domainname, port) => {
@@ -96,7 +96,7 @@ pub async fn bind_listeners<'a>(address: AddressOrDomainnameRef<'a>) -> io::Resu
     }
 }
 
-pub async fn bind_connect<'a>(address: AddressOrDomainnameRef<'a>) -> io::Result<TcpStream> {
+pub async fn bind_connect(address: AddressOrDomainnameRef<'_>) -> io::Result<TcpStream> {
     match address {
         AddressOrDomainnameRef::Address(address) => TcpStream::connect(address).await,
         AddressOrDomainnameRef::Domainname(domainname, port) => {

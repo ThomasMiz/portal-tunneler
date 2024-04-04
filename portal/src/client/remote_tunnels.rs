@@ -1,78 +1,22 @@
 use std::{
-    collections::HashMap,
     io::{self, Error, ErrorKind},
     rc::Rc,
 };
 
 use portal_tunneler_proto::{
+    client::ClientState,
     serialize::{ByteRead, ByteWrite},
-    shared::{
-        ClientStreamRequest, OpenConnectionError, OpenRemoteConnectionRequest, OpenRemoteConnectionResponseRef, RemoteTunnelID,
-        StartRemoteTunnelRequestRef, StartRemoteTunnelResponse, TunnelSpec, TunnelTarget, TunnelTargetType,
-    },
+    shared::{OpenConnectionError, OpenRemoteConnectionRequest, OpenRemoteConnectionResponseRef, TunnelTarget},
 };
-use quinn::{Connection, RecvStream, SendStream};
+use quinn::{RecvStream, SendStream};
 use tokio::try_join;
 
 use crate::utils::{bind_connect, UNSPECIFIED_SOCKADDR_V4};
 
-pub async fn create_remote_tunnels(
-    connection: &Connection,
-    remote_tunnel_specs: Vec<TunnelSpec>,
-) -> io::Result<HashMap<RemoteTunnelID, TunnelSpec>> {
-    if remote_tunnel_specs.is_empty() {
-        return Ok(HashMap::new());
-    }
-
-    let (mut send_stream, mut recv_stream) = connection.open_bi().await?;
-    ClientStreamRequest::StartRemoteTunnels.write(&mut send_stream).await?;
-
-    async fn send_tunnel_specs_task(send_stream: &mut SendStream, remote_tunnel_specs: &[TunnelSpec]) -> io::Result<()> {
-        for (i, spec) in remote_tunnel_specs.iter().enumerate() {
-            let target_type = match spec.target {
-                TunnelTarget::Address(_) => TunnelTargetType::Static,
-                TunnelTarget::Socks => TunnelTargetType::Socks,
-            };
-
-            let request = StartRemoteTunnelRequestRef::new(RemoteTunnelID(i as u32), target_type, spec.listen_address.as_ref());
-            request.write(send_stream).await?;
-        }
-
-        send_stream.finish().await?;
-        Ok(())
-    }
-
-    async fn receive_tunnel_results(
-        recv_stream: &mut RecvStream,
-        remote_tunnel_specs: &[TunnelSpec],
-    ) -> io::Result<HashMap<RemoteTunnelID, TunnelSpec>> {
-        let mut map = HashMap::new();
-
-        for (i, spec) in remote_tunnel_specs.iter().enumerate() {
-            let response = StartRemoteTunnelResponse::read(recv_stream).await?;
-            match response.result {
-                Ok(()) => {
-                    map.insert(RemoteTunnelID(i as u32), spec.clone()); // <-- TODO: This clone could be avoided
-                }
-                Err(error) => eprintln!("Couldn't start remote tunnel {}, server responded with error: {error}", spec.index),
-            }
-        }
-
-        Ok(map)
-    }
-
-    let (_, map) = try_join!(
-        send_tunnel_specs_task(&mut send_stream, &remote_tunnel_specs),
-        receive_tunnel_results(&mut recv_stream, &remote_tunnel_specs),
-    )?;
-
-    Ok(map)
-}
-
 pub async fn handle_incoming_bi_stream(
+    client: Rc<ClientState>,
     mut send_stream: SendStream,
     mut recv_stream: RecvStream,
-    remote_tunnels: Rc<HashMap<RemoteTunnelID, TunnelSpec>>,
 ) -> io::Result<()> {
     // Incoming (server-opened) bidi streams are exclusively used for new connections in a remote tunnel.
 
@@ -80,7 +24,7 @@ pub async fn handle_incoming_bi_stream(
 
     let request = OpenRemoteConnectionRequest::read(&mut recv_stream).await?;
 
-    let spec = match remote_tunnels.get(&request.tunnel_id) {
+    let spec = match client.lock().get_remote_tunnel(request.tunnel_id) {
         Some(spec) => spec,
         None => {
             eprintln!("Error: Server opened a new tunnel but specified invalid tunnel ID");

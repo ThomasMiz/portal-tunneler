@@ -46,6 +46,16 @@ pub enum TunnelTarget {
     Socks,
 }
 
+impl TunnelTarget {
+    /// Gets this [`TunnelTarget`]'s respective [`TunnelTargetType`] value.
+    pub fn as_type(&self) -> TunnelTargetType {
+        match self {
+            Self::Address(_) => TunnelTargetType::Static,
+            Self::Socks => TunnelTargetType::Socks,
+        }
+    }
+}
+
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TunnelTargetType {
