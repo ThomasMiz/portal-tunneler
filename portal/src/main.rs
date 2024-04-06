@@ -25,6 +25,7 @@ mod endpoint;
 mod puncher;
 mod server;
 mod shared_socket;
+mod socks;
 mod utils;
 
 fn main() {

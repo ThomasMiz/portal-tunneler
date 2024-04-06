@@ -16,7 +16,7 @@ use tokio::{
     try_join,
 };
 
-use crate::utils::bind_listeners;
+use crate::{socks, utils::bind_listeners};
 
 pub async fn handle_start_remote_tunnels_stream(
     connection: Rc<Connection>,
@@ -86,30 +86,40 @@ pub async fn handle_remote_tunnel(
         }
     };
 
-    let maybe_target = match target_type {
+    let (mut read_half, mut write_half) = tcp_stream.split();
+
+    let maybe_socks_data = match target_type {
         TunnelTargetType::Static => {
             println!("Tunneling through static tunnel");
             None
         }
         TunnelTargetType::Socks => {
-            unimplemented!("TODO: Implement SOCKS protocol")
+            let request_result = socks::read_request(&mut read_half, &mut write_half).await;
+
+            if let Err(socks_error) = &request_result {
+                println!("Socks error: {socks_error}");
+                socks::send_request_error(&mut write_half, socks_error).await?;
+            }
+
+            Some(request_result?)
         }
     };
 
+    let maybe_target = maybe_socks_data.as_ref().map(|(_, addr)| addr.as_ref());
     let request = OpenRemoteConnectionRequestRef::new(tunnel_id, maybe_target);
     request.write(&mut send_stream).await?;
 
     let response = OpenRemoteConnectionResponse::read(&mut recv_stream).await?;
-    let bound_address = match response.result {
-        Ok(addr) => addr,
-        Err((start_error, error)) => {
-            eprintln!("Remote tunnel failed to connect to target due to {start_error} failure: {error}");
-            return Err(error);
-        }
-    };
+    if let Err((conn_error, error)) = &response.result {
+        eprintln!("Remote tunnel failed to connect to target due to {conn_error} failure: {error}");
+    }
 
+    if let Some((socks_version, _)) = maybe_socks_data {
+        socks::send_response(&mut write_half, socks_version, &response.result).await?;
+    }
+
+    let bound_address = response.result.map_err(|(_, error)| error)?;
     println!("Remote tunnel connected (remote socket bound at {bound_address})");
-    let (mut read_half, mut write_half) = tcp_stream.split();
     let result = try_join!(
         tokio::io::copy(&mut read_half, &mut send_stream),
         tokio::io::copy(&mut recv_stream, &mut write_half),

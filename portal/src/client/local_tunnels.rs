@@ -11,6 +11,8 @@ use tokio::{
     try_join,
 };
 
+use crate::socks;
+
 pub async fn handle_local_tunnel_listening(client: Rc<ClientState>, listener: TcpListener, spec: Rc<TunnelSpec>) {
     loop {
         let (tcp_stream, from) = match listener.accept().await {
@@ -42,25 +44,41 @@ pub async fn handle_local_tunnel(client: Rc<ClientState>, mut tcp_stream: TcpStr
     let (mut send_stream, mut recv_stream) = client.connection().open_bi().await?;
     ClientStreamRequest::OpenLocalTunnelConnection.write(&mut send_stream).await?;
 
-    let request = match &spec.target {
-        TunnelTarget::Socks => unimplemented!("TODO: Implement SOCKS protocol"),
-        TunnelTarget::Address(address) => OpenLocalConnectionRequestRef::new(address.as_ref()),
+    let (mut read_half, mut write_half) = tcp_stream.split();
+
+    let maybe_socks_target;
+    let (maybe_socks_version, target) = match &spec.target {
+        TunnelTarget::Socks => {
+            let request_result = socks::read_request(&mut read_half, &mut write_half).await;
+
+            if let Err(socks_error) = &request_result {
+                println!("Socks error: {socks_error}");
+                socks::send_request_error(&mut write_half, socks_error).await?;
+            }
+
+            let (version, target) = request_result?;
+            maybe_socks_target = Some(target);
+            (Some(version), maybe_socks_target.as_ref().unwrap().as_ref())
+        }
+        TunnelTarget::Address(address) => (None, address.as_ref()),
     };
 
+    let request = OpenLocalConnectionRequestRef::new(target);
     request.write(&mut send_stream).await?;
 
     let response = OpenLocalConnectionResponse::read(&mut recv_stream).await?;
-    let bind_address = match response.result {
-        Ok(address) => address,
-        Err((start_error, error)) => {
-            eprintln!("Failed to connect local tunnel, server responded with {start_error} failure: {error}");
-            return Err(error);
-        }
-    };
+    if let Err((start_error, error)) = &response.result {
+        eprintln!("Failed to connect local tunnel, server responded with {start_error} failure: {error}");
+    }
+
+    if let Some(socks_version) = maybe_socks_version {
+        socks::send_response(&mut write_half, socks_version, &response.result).await?;
+    }
+
+    let bind_address = response.result.map_err(|(_, error)| error)?;
 
     println!("Local tunnel connected through server (remote socket bound at {bind_address})");
 
-    let (mut read_half, mut write_half) = tcp_stream.split();
     let result = try_join!(
         tokio::io::copy(&mut read_half, &mut send_stream),
         tokio::io::copy(&mut recv_stream, &mut write_half),
