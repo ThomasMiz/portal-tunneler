@@ -41,9 +41,6 @@ pub async fn handle_local_tunnel_listening(client: Rc<ClientState>, listener: Tc
 }
 
 pub async fn handle_local_tunnel(client: Rc<ClientState>, mut tcp_stream: TcpStream, spec: Rc<TunnelSpec>) -> io::Result<()> {
-    let (mut send_stream, mut recv_stream) = client.connection().open_bi().await?;
-    ClientStreamRequest::OpenLocalTunnelConnection.write(&mut send_stream).await?;
-
     let (mut read_half, mut write_half) = tcp_stream.split();
 
     let maybe_socks_target;
@@ -62,6 +59,9 @@ pub async fn handle_local_tunnel(client: Rc<ClientState>, mut tcp_stream: TcpStr
         }
         TunnelTarget::Address(address) => (None, address.as_ref()),
     };
+
+    let (mut send_stream, mut recv_stream) = client.connection().open_bi().await?;
+    ClientStreamRequest::OpenLocalTunnelConnection.write(&mut send_stream).await?;
 
     let request = OpenLocalConnectionRequestRef::new(target);
     request.write(&mut send_stream).await?;

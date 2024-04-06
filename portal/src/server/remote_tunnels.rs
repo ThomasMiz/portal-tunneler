@@ -78,14 +78,6 @@ pub async fn handle_remote_tunnel(
     tunnel_id: RemoteTunnelID,
     target_type: TunnelTargetType,
 ) -> io::Result<()> {
-    let (mut send_stream, mut recv_stream) = match connection.open_bi().await {
-        Ok(t) => t,
-        Err(error) => {
-            eprintln!("Couldn't start remote tunnel, error while opening bidi stream: {error}");
-            return Err(error.into());
-        }
-    };
-
     let (mut read_half, mut write_half) = tcp_stream.split();
 
     let maybe_socks_data = match target_type {
@@ -102,6 +94,14 @@ pub async fn handle_remote_tunnel(
             }
 
             Some(request_result?)
+        }
+    };
+
+    let (mut send_stream, mut recv_stream) = match connection.open_bi().await {
+        Ok(t) => t,
+        Err(error) => {
+            eprintln!("Couldn't start remote tunnel, error while opening bidi stream: {error}");
+            return Err(error.into());
         }
     };
 
