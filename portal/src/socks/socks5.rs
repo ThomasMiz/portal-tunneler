@@ -1,17 +1,17 @@
 use std::{
-    io::{self, Error, ErrorKind},
+    io::{Error, ErrorKind},
     net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
     num::NonZeroU16,
 };
 
 use inlined::TinyVec;
 use portal_tunneler_proto::{
-    serialize::{ByteRead, ByteWrite, U8ReprEnum},
+    serialize::{ByteRead, U8ReprEnum},
     shared::{AddressOrDomainname, OpenConnectionError},
 };
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
-use crate::utils::{read_domainname, UNSPECIFIED_SOCKADDR_V4};
+use crate::utils::{read_chunked_domainname, UNSPECIFIED_SOCKADDR_V4};
 
 use super::SocksRequestError;
 
@@ -19,7 +19,7 @@ pub const VERSION_BYTE: u8 = 5;
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SocksStatus {
+enum StatusCode {
     Succeeded = 0,
     GeneralFailure = 1,
     NotAllowedByRuleset = 2,
@@ -31,22 +31,43 @@ pub enum SocksStatus {
     AtypNotSupported = 8,
 }
 
-impl From<&Error> for SocksStatus {
+impl U8ReprEnum for StatusCode {
+    fn from_u8(value: u8) -> Option<Self> {
+        match value {
+            0 => Some(Self::Succeeded),
+            1 => Some(Self::GeneralFailure),
+            2 => Some(Self::NotAllowedByRuleset),
+            3 => Some(Self::NetworkUnreachable),
+            4 => Some(Self::HostUnreachable),
+            5 => Some(Self::ConnectionRefused),
+            6 => Some(Self::TTLExpired),
+            7 => Some(Self::CommandNotSupported),
+            8 => Some(Self::AtypNotSupported),
+            _ => None,
+        }
+    }
+
+    fn into_u8(self) -> u8 {
+        self as u8
+    }
+}
+
+impl From<&Error> for StatusCode {
     fn from(value: &Error) -> Self {
         match value.kind() {
-            ErrorKind::ConnectionAborted | ErrorKind::ConnectionRefused | ErrorKind::ConnectionReset => SocksStatus::ConnectionRefused,
-            ErrorKind::NotConnected => SocksStatus::NetworkUnreachable,
-            ErrorKind::PermissionDenied => SocksStatus::NotAllowedByRuleset,
-            ErrorKind::TimedOut => SocksStatus::HostUnreachable,
-            ErrorKind::AddrNotAvailable | ErrorKind::Unsupported => SocksStatus::AtypNotSupported,
-            _ => SocksStatus::GeneralFailure,
+            ErrorKind::ConnectionAborted | ErrorKind::ConnectionRefused | ErrorKind::ConnectionReset => StatusCode::ConnectionRefused,
+            ErrorKind::NotConnected => StatusCode::NetworkUnreachable,
+            ErrorKind::PermissionDenied => StatusCode::NotAllowedByRuleset,
+            ErrorKind::TimedOut => StatusCode::HostUnreachable,
+            ErrorKind::AddrNotAvailable | ErrorKind::Unsupported => StatusCode::AtypNotSupported,
+            _ => StatusCode::GeneralFailure,
         }
     }
 }
 
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SocksAtyp {
+enum SocksAtyp {
     IPv4 = 1,
     Domainname = 3,
     IPv6 = 4,
@@ -89,13 +110,15 @@ where
     writer.write_all(&[VERSION_BYTE, 0u8]).await?;
 
     // Connect request: VER
-    if reader.read_u8().await? != 5 {
-        return Err(SocksRequestError::Socks5InvalidVersion);
+    let ver = reader.read_u8().await?;
+    if ver != 5 {
+        return Err(SocksRequestError::Socks5InvalidVersion(ver));
     }
 
     // Connect request: CMD
-    if reader.read_u8().await? != 1 {
-        return Err(SocksRequestError::Socks5InvalidCommand);
+    let cmd = reader.read_u8().await?;
+    if cmd != 1 {
+        return Err(SocksRequestError::Socks5InvalidCommand(cmd));
     }
 
     // Connect request: RSV
@@ -126,7 +149,7 @@ where
             AddressOrDomainname::Address(SocketAddr::V6(SocketAddrV6::new(ip, port, 0, 0)))
         }
         SocksAtyp::Domainname => {
-            let domainname = read_domainname(reader).await?;
+            let domainname = read_chunked_domainname(reader).await?;
             let port = NonZeroU16::read(reader).await?;
 
             AddressOrDomainname::Domainname(domainname, port)
@@ -136,55 +159,19 @@ where
     Ok(target)
 }
 
-impl U8ReprEnum for SocksStatus {
-    fn from_u8(value: u8) -> Option<Self> {
-        match value {
-            0 => Some(Self::Succeeded),
-            1 => Some(Self::GeneralFailure),
-            2 => Some(Self::NotAllowedByRuleset),
-            3 => Some(Self::NetworkUnreachable),
-            4 => Some(Self::HostUnreachable),
-            5 => Some(Self::ConnectionRefused),
-            6 => Some(Self::TTLExpired),
-            7 => Some(Self::CommandNotSupported),
-            8 => Some(Self::AtypNotSupported),
-            _ => None,
-        }
-    }
-
-    fn into_u8(self) -> u8 {
-        self as u8
-    }
-}
-
-impl ByteWrite for SocksStatus {
-    async fn write<W: AsyncWrite + Unpin + ?Sized>(&self, writer: &mut W) -> io::Result<()> {
-        self.into_u8().write(writer).await
-    }
-}
-
-impl ByteRead for SocksStatus {
-    async fn read<R: AsyncRead + Unpin + ?Sized>(reader: &mut R) -> io::Result<Self> {
-        match Self::from_u8(u8::read(reader).await?) {
-            Some(role) => Ok(role),
-            None => Err(Error::new(ErrorKind::InvalidData, "Invalid SocksReplyStatus type byte")),
-        }
-    }
-}
-
 pub async fn send_request_error<W>(writer: &mut W, error: &SocksRequestError) -> Result<(), Error>
 where
     W: AsyncWrite + Unpin + ?Sized,
 {
     match error {
         SocksRequestError::Socks5NoAuthMethodAcceptable => writer.write_all(&[VERSION_BYTE, 0xFFu8]).await,
-        SocksRequestError::Socks5InvalidCommand => {
-            let rep = SocksStatus::CommandNotSupported as u8;
+        SocksRequestError::Socks5InvalidCommand(_) => {
+            let rep = StatusCode::CommandNotSupported as u8;
             let buf = &[VERSION_BYTE, rep, 0, SocksAtyp::IPv4 as u8, 0, 0, 0, 0, 0, 0];
             writer.write_all(buf).await
         }
         SocksRequestError::Socks5InvalidAtyp(_) => {
-            let rep = SocksStatus::AtypNotSupported as u8;
+            let rep = StatusCode::AtypNotSupported as u8;
             let buf = &[VERSION_BYTE, rep, 0, SocksAtyp::IPv4 as u8, 0, 0, 0, 0, 0, 0];
             writer.write_all(buf).await
         }
@@ -197,11 +184,11 @@ where
     W: AsyncWrite + Unpin + ?Sized,
 {
     let (rep, bind_address) = match result {
-        Ok(address) => (SocksStatus::Succeeded, *address),
+        Ok(address) => (StatusCode::Succeeded, *address),
         Err((conn_error, error)) => {
             let rep = match conn_error {
                 OpenConnectionError::Connect => error.into(),
-                _ => SocksStatus::GeneralFailure,
+                _ => StatusCode::GeneralFailure,
             };
 
             (rep, UNSPECIFIED_SOCKADDR_V4)

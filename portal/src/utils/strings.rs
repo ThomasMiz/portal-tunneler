@@ -43,8 +43,9 @@ pub fn cut_string<R: RangeBounds<usize>>(mut s: String, range: R) -> String {
     s
 }
 
-/// Asynchronously reads a domainname string from an [`AsyncRead`].
-pub async fn read_domainname<R>(reader: &mut R) -> Result<String, Error>
+/// Asynchronously reads a domainname string from an [`AsyncRead`], with the first byte being the
+/// length N, and the following N bytes being read into a [`String`].
+pub async fn read_chunked_domainname<R>(reader: &mut R) -> Result<String, Error>
 where
     R: AsyncRead + Unpin + ?Sized,
 {
@@ -76,6 +77,47 @@ where
 
             count += more;
         }
+    }
+
+    Ok(s)
+}
+
+/// Asynchronously reads a domainname string from an [`AsyncRead`], reading bytes until a zero, or
+/// "null-termination", is encountered.
+pub async fn read_nullterm_domainname<R>(reader: &mut R) -> Result<String, Error>
+where
+    R: AsyncRead + Unpin + ?Sized,
+{
+    let mut s = String::with_capacity(255);
+
+    unsafe {
+        let buf = s.as_mut_vec();
+        // SAFETY: We ensure the bytes read into the string are valid UTF-8 by checking that they
+        // are graphical ASCII values, which are all valid UTF-8.
+
+        loop {
+            let c = reader.read_u8().await?;
+            if c == 0 {
+                break;
+            }
+
+            if !c.is_ascii_alphanumeric() && c != b'-' && c != b'.' {
+                return Err(Error::new(
+                    ErrorKind::InvalidData,
+                    format!("Domainname contains invalid character: {c}"),
+                ));
+            }
+
+            buf.push(c);
+
+            if buf.len() == 255 {
+                return Err(Error::new(ErrorKind::InvalidData, "Domainname length cannot be greater than 255"));
+            }
+        }
+    }
+
+    if s.is_empty() {
+        return Err(Error::new(ErrorKind::InvalidData, "Domainname length cannot be 0"));
     }
 
     Ok(s)

@@ -19,9 +19,10 @@ mod version;
 pub enum SocksRequestError {
     IO(Error),
     InvalidVersion(u8),
+    Socks4InvalidCommand(u8),
     Socks5NoAuthMethodAcceptable,
-    Socks5InvalidVersion,
-    Socks5InvalidCommand,
+    Socks5InvalidVersion(u8),
+    Socks5InvalidCommand(u8),
     Socks5InvalidAtyp(u8),
 }
 
@@ -30,9 +31,10 @@ impl std::fmt::Display for SocksRequestError {
         match self {
             Self::IO(error) => error.fmt(f),
             Self::InvalidVersion(ver) => write!(f, "Client requested invalid SOCKS version: {ver}"),
+            Self::Socks4InvalidCommand(cmd) => write!(f, "Client requested invalid SOCKS4 command: {cmd}"),
             Self::Socks5NoAuthMethodAcceptable => write!(f, "No acceptable SOCKS5 authentication method"),
-            Self::Socks5InvalidVersion => write!(f, "Client requested SOCKS5, but then specified another version"),
-            Self::Socks5InvalidCommand => write!(f, "Invalid SOCKS5 command"),
+            Self::Socks5InvalidVersion(ver) => write!(f, "Client requested SOCKS5, but then specified another version: {ver}"),
+            Self::Socks5InvalidCommand(cmd) => write!(f, "Client requested invalid SOCKS5 command: {cmd}"),
             Self::Socks5InvalidAtyp(atyp) => write!(f, "Client requested invalid SOCKS5 address type: {atyp}"),
         }
     }
@@ -62,7 +64,7 @@ where
     let version = SocksVersion::from_u8(version_u8).ok_or(SocksRequestError::InvalidVersion(version_u8))?;
 
     let target = match version {
-        SocksVersion::Four => socks4::read_request(reader, writer).await?,
+        SocksVersion::Four => socks4::read_request(reader).await?,
         SocksVersion::Five => socks5::read_request(reader, writer).await?,
     };
 
@@ -74,10 +76,10 @@ where
     W: AsyncWrite + Unpin + ?Sized,
 {
     match error {
-        // _ => socks4::send_request_error(writer, error).await,
+        SocksRequestError::Socks4InvalidCommand(_) => socks4::send_request_error(writer, error).await,
         SocksRequestError::Socks5InvalidAtyp(_)
-        | SocksRequestError::Socks5InvalidCommand
-        | SocksRequestError::Socks5InvalidVersion
+        | SocksRequestError::Socks5InvalidCommand(_)
+        | SocksRequestError::Socks5InvalidVersion(_)
         | SocksRequestError::Socks5NoAuthMethodAcceptable => socks5::send_request_error(writer, error).await,
         _ => Ok(()),
     }
