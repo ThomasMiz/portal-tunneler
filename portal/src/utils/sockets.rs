@@ -66,7 +66,12 @@ pub async fn accept_from_any(listeners: &[TcpListener]) -> (usize, io::Result<(T
 
 pub async fn bind_listeners(address: AddressOrDomainnameRef<'_>) -> io::Result<CompactVec<3, TcpListener>> {
     match address {
-        AddressOrDomainnameRef::Address(address) => Ok(CompactVec::from(TcpListener::bind(address).await?)),
+        AddressOrDomainnameRef::Address(address) => {
+            //Ok(CompactVec::from(TcpListener::bind(address).await?)) // TODO: Restore once non-nightly compiler stops complaining about the `?`
+            let mut vec = CompactVec::new();
+            vec.push(TcpListener::bind(address).await?);
+            Ok(vec)
+        },
         AddressOrDomainnameRef::Domainname(domainname, port) => {
             let mut s = InlineString::<262>::new();
             let _ = write!(s, "{domainname}:{port}");

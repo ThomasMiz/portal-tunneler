@@ -1,8 +1,19 @@
 [package]
-name = "portal"
-version = "0.1.0"
+name = "portal-tunneler"
+version = "0.1.0-beta.0"
 edition = "2021"
 default-run = "portal"
+description = "Create SSH-like TCP tunnels over a hole-punched QUIC connection"
+license = "MIT OR Apache-2.0"
+readme = "../README.md"
+repository = "https://github.com/ThomasMiz/portal-tunneler"
+keywords = ["network", "tunnel", "hole-punching", "quic", "peer-to-peer"]
+categories = ["network-programming"]
+rust-version = "1.77.1"
+
+[[bin]]
+path = "src/main.rs"
+name = "portal"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -13,6 +24,6 @@ quinn-udp = { version = "0.4.1" }
 rustls = { version = "0.21.10", features = ["dangerous_configuration"] }
 rcgen = "0.12.1"
 base64 = { version = "0.22.0" }
-portal-puncher-sm = { path = "../portal-puncher-sm", version = "0.1.0" }
+portal-puncher-sm = { path = "../portal-puncher-sm", version = "0.1.0-beta.0" }
+portal-tunneler-proto = { path = "../portal-tunneler-proto", version = "0.1.0-beta.0" }
 inlined = { path = "../inlined", version = "0.1.0" }
-portal-tunneler-proto = { path = "../portal-tunneler-proto", version = "0.1.0" }
