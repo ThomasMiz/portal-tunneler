@@ -23,7 +23,7 @@ use crate::{
         socket_binder::bind_sockets,
         PunchConnectResult,
     },
-    utils::{UNSPECIFIED_SOCKADDR_V4, UNSPECIFIED_SOCKADDR_V6},
+    utils::{get_current_timestamp, UNSPECIFIED_SOCKADDR_V4, UNSPECIFIED_SOCKADDR_V6},
 };
 
 pub async fn punch(punch_config: PunchConfig, is_server: bool) -> io::Result<PunchConnectResult> {
@@ -66,6 +66,10 @@ pub async fn punch(punch_config: PunchConfig, is_server: bool) -> io::Result<Pun
         let message = format!("Invalid error code: {e:?}");
         Error::new(ErrorKind::InvalidData, message)
     })?;
+
+    if destination_code.timestamp < get_current_timestamp() - 600 {
+        println!("Warning! This connection code is over 10 minutes old.");
+    }
 
     if connection_code.lane_count != destination_code.lane_count {
         println!("Warning! The lane counts on the connection codes don't match. The minimum will be used.");
