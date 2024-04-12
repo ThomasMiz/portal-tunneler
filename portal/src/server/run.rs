@@ -1,4 +1,4 @@
-use std::{io, rc::Rc};
+use std::{io, net::SocketAddr, rc::Rc};
 
 use portal_tunneler_proto::{serialize::ByteRead, shared::ClientStreamRequest};
 use quinn::{Connecting, Connection, Endpoint, RecvStream, SendStream, VarInt};
@@ -9,7 +9,7 @@ use tokio::{
 
 use super::{local_tunnels::handle_open_local_tunnel_stream, remote_tunnels::handle_start_remote_tunnels_stream};
 
-pub async fn run_server(endpoint: Endpoint, abort_on_connect: Option<JoinHandle<()>>) {
+pub async fn run_server(endpoint: Endpoint, abort_on_connect: Option<JoinHandle<()>>, address_filter: Option<SocketAddr>) {
     println!("Starting server on {}", endpoint.local_addr().unwrap());
 
     loop {
@@ -21,12 +21,13 @@ pub async fn run_server(endpoint: Endpoint, abort_on_connect: Option<JoinHandle<
         };
 
         let incoming_connection = match incoming_connection {
+            Some(c) if address_filter.is_some_and(|addr| addr != c.remote_address()) => continue,
             Some(c) => c,
             None => break,
         };
 
         let abort_on_connect = abort_on_connect.as_ref().map(|h| h.abort_handle());
-        println!("Incoming connection form addr={}", incoming_connection.remote_address());
+        println!("Incoming connection from addr={}", incoming_connection.remote_address());
         tokio::task::spawn_local(async move {
             handle_connection(incoming_connection, abort_on_connect).await;
         });

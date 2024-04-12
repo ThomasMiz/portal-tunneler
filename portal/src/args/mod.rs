@@ -9,6 +9,7 @@ mod ports;
 mod tunnels;
 
 pub use addresses::*;
+use inlined::CompactVec;
 pub use parser::*;
 use portal_tunneler_proto::shared::TunnelSpec;
 pub use ports::*;
@@ -69,14 +70,14 @@ pub struct StartupArguments {
 pub enum ConnectMethod {
     /// Connect to the remote peer via direct communication. This means attempting to connect to
     /// these socket addresses (client), or listening on them for incoming connections (server).
-    Direct(Vec<SocketAddr>),
+    Direct(CompactVec<2, SocketAddr>),
 
     /// Connect to the remote peer via hole-punching.
     Punch(PunchConfig),
 }
 
 /// Specifies configuration for hole-punching.
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PunchConfig {
     /// Our publicly-visible IP address. If `None`, then it will be queried with a public API.
     pub my_ip: Option<IpAddr>,

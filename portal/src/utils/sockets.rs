@@ -71,7 +71,7 @@ pub async fn bind_listeners(address: AddressOrDomainnameRef<'_>) -> io::Result<C
             let mut vec = CompactVec::new();
             vec.push(TcpListener::bind(address).await?);
             Ok(vec)
-        },
+        }
         AddressOrDomainnameRef::Domainname(domainname, port) => {
             let mut s = InlineString::<262>::new();
             let _ = write!(s, "{domainname}:{port}");

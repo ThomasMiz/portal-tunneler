@@ -7,14 +7,12 @@ use std::{
     task::Poll,
 };
 
+use inlined::CompactVec;
 use quinn::{Connection, Endpoint};
-use tokio::{
-    io::{stdin, AsyncBufReadExt, BufReader},
-    task::JoinHandle,
-};
+use tokio::io::{stdin, AsyncBufReadExt, BufReader};
 
 use crate::{
-    args::{ConnectMethod, PunchConfig},
+    args::PunchConfig,
     endpoint::{make_endpoint, EndpointSocketSource},
     puncher::{
         self,
@@ -86,30 +84,28 @@ pub async fn punch(punch_config: PunchConfig, is_server: bool) -> io::Result<Pun
     puncher::punch_connection(is_server, sockets, destination_code.address, remote_port_start, lane_count).await
 }
 
-pub async fn connect_client(connect_method: ConnectMethod) -> io::Result<(Endpoint, Connection)> {
-    match connect_method {
-        ConnectMethod::Punch(punch_config) => {
-            let (socket, destination_address) = match punch(punch_config, false).await? {
-                PunchConnectResult::Listen(_, _, _) => panic!("Puncher state machine indicated to listen, but we're on client mode!"),
-                PunchConnectResult::Connect(socket, destination_address) => (socket, destination_address),
+pub async fn connect_client(
+    maybe_socket: Option<EndpointSocketSource>,
+    addresses: CompactVec<2, SocketAddr>,
+) -> io::Result<(Endpoint, Connection)> {
+    let ipv4_endpoint;
+    let ipv6_endpoint;
+
+    match maybe_socket {
+        Some(socket) => {
+            let bound_address = socket.local_addr()?;
+            let endpoint = make_endpoint(socket, true, false)?;
+
+            (ipv4_endpoint, ipv6_endpoint) = match bound_address {
+                SocketAddr::V4(_) => (Some(endpoint), None),
+                SocketAddr::V6(_) => (None, Some(endpoint)),
             };
-
-            let socket = socket.into_std()?;
-            let endpoint = make_endpoint(EndpointSocketSource::Simple(socket), true, false)?;
-
-            let connecting = endpoint
-                .connect(destination_address, "localhost")
-                .map_err(|e| Error::new(ErrorKind::Other, format!("Error while connecting to remote endpoint: {e}")))?;
-
-            let connection = connecting.await?;
-            Ok((endpoint, connection))
         }
-        ConnectMethod::Direct(addresses) => {
-            let ipv4_endpoint = match addresses.iter().any(|a| a.is_ipv4()) {
+        None => {
+            ipv4_endpoint = match addresses.iter().any(|a| a.is_ipv4()) {
                 false => None,
                 true => {
-                    let bind_address = UNSPECIFIED_SOCKADDR_V4;
-                    let result = std::net::UdpSocket::bind(bind_address)
+                    let result = std::net::UdpSocket::bind(UNSPECIFIED_SOCKADDR_V4)
                         .and_then(|socket| make_endpoint(EndpointSocketSource::Simple(socket), true, false));
 
                     match result {
@@ -122,11 +118,10 @@ pub async fn connect_client(connect_method: ConnectMethod) -> io::Result<(Endpoi
                 }
             };
 
-            let ipv6_endpoint = match addresses.iter().any(|a| a.is_ipv6()) {
+            ipv6_endpoint = match addresses.iter().any(|a| a.is_ipv6()) {
                 false => None,
                 true => {
-                    let bind_address = UNSPECIFIED_SOCKADDR_V6;
-                    let result = std::net::UdpSocket::bind(bind_address)
+                    let result = std::net::UdpSocket::bind(UNSPECIFIED_SOCKADDR_V6)
                         .and_then(|socket| make_endpoint(EndpointSocketSource::Simple(socket), true, false));
 
                     match result {
@@ -138,106 +133,101 @@ pub async fn connect_client(connect_method: ConnectMethod) -> io::Result<(Endpoi
                     }
                 }
             };
-
-            let mut connect_futures = Vec::new();
-            connect_futures.reserve_exact(addresses.len());
-
-            for address in addresses {
-                let maybe_endpoint = match address {
-                    SocketAddr::V4(_) => &ipv4_endpoint,
-                    SocketAddr::V6(_) => &ipv6_endpoint,
-                };
-
-                let endpoint = match maybe_endpoint {
-                    Some(endpoint) => endpoint,
-                    None => unreachable!(),
-                };
-
-                match endpoint.connect(address, "localhost") {
-                    Ok(c) => connect_futures.push(c),
-                    Err(error) => println!("Couldn't start connection to {address}: {error}"),
-                };
-            }
-
-            let result = poll_fn(move |cx| {
-                let mut i = 0;
-                while i < connect_futures.len() {
-                    match Pin::new(&mut connect_futures[i]).poll(cx) {
-                        Poll::Ready(Ok(connection)) => return Poll::Ready(Some(connection)),
-                        Poll::Ready(Err(error)) => {
-                            println!("Connection to {} failed: {error}", connect_futures[i].remote_address());
-                            drop(connect_futures.swap_remove(i));
-                        }
-                        Poll::Pending => i += 1,
-                    }
-                }
-
-                match connect_futures.is_empty() {
-                    true => Poll::Ready(None),
-                    false => Poll::Pending,
-                }
-            })
-            .await;
-
-            let connection = match result {
-                Some(conn) => conn,
-                None => {
-                    return Err(Error::new(
-                        ErrorKind::Other,
-                        "Couldn't establish a connection to any of the provided addresses",
-                    ))
-                }
-            };
-
-            let endpoint = match connection.remote_address() {
-                SocketAddr::V4(_) => ipv4_endpoint.unwrap(),
-                SocketAddr::V6(_) => ipv6_endpoint.unwrap(),
-            };
-
-            Ok((endpoint, connection))
         }
     }
-}
 
-pub async fn connect_server(connect_method: ConnectMethod) -> io::Result<(Vec<Endpoint>, Option<JoinHandle<()>>)> {
-    match connect_method {
-        ConnectMethod::Punch(punch_config) => {
-            let (socket, background_task_handle) = match punch(punch_config, true).await? {
-                PunchConnectResult::Listen(socket, _remote_address, handle) => (socket, handle),
-                PunchConnectResult::Connect(_, _) => panic!("Puncher state machine indicated to connect, but we're on server mode!"),
-            };
+    let mut connect_futures = Vec::new();
+    connect_futures.reserve_exact(addresses.len());
 
-            let endpoint = make_endpoint(EndpointSocketSource::Shared(socket), false, true)?;
-            Ok((vec![endpoint], Some(background_task_handle)))
-        }
-        ConnectMethod::Direct(addresses) => {
-            let mut endpoints = Vec::new();
+    for address in addresses {
+        let maybe_endpoint = match address {
+            SocketAddr::V4(_) => &ipv4_endpoint,
+            SocketAddr::V6(_) => &ipv6_endpoint,
+        };
 
-            for address in addresses {
-                let socket = match std::net::UdpSocket::bind(address) {
-                    Ok(so) => so,
-                    Err(error) => {
-                        println!("Couldn't bind socket at {address}: {error}");
-                        continue;
-                    }
-                };
+        let endpoint = match maybe_endpoint {
+            Some(endpoint) => endpoint,
+            None => continue,
+        };
 
-                match make_endpoint(EndpointSocketSource::Simple(socket), false, true) {
-                    Ok(ep) => endpoints.push(ep),
-                    Err(error) => {
-                        println!("Couldn't create endpoint at {address}: {error}");
-                        continue;
+        match endpoint.connect(address, "server_name") {
+            Ok(c) => connect_futures.push((c, address)),
+            Err(error) => println!("Couldn't start connection to {address}: {error}"),
+        };
+    }
+
+    let result = poll_fn(move |cx| {
+        let mut i = 0;
+        while i < connect_futures.len() {
+            match Pin::new(&mut connect_futures[i].0).poll(cx) {
+                Poll::Ready(Ok(connection)) => return Poll::Ready(Some(connection)),
+                Poll::Ready(Err(error)) => {
+                    println!("Connection to {} failed: {error}", connect_futures[i].1);
+                    drop(connect_futures.swap_remove(i));
+
+                    if connect_futures.is_empty() {
+                        return Poll::Ready(None);
                     }
                 }
-            }
-
-            match endpoints.is_empty() {
-                true => Err(Error::new(
-                    ErrorKind::Other,
-                    "Couldn't bind a socket to any of the provided addresses",
-                )),
-                false => Ok((endpoints, None)),
+                Poll::Pending => i += 1,
             }
         }
+
+        Poll::Pending
+    })
+    .await;
+
+    let connection = match result {
+        Some(conn) => conn,
+        None => {
+            return Err(Error::new(
+                ErrorKind::Other,
+                "Couldn't establish a connection to any of the provided addresses",
+            ))
+        }
+    };
+
+    let endpoint = match connection.remote_address() {
+        SocketAddr::V4(_) => ipv4_endpoint.unwrap(),
+        SocketAddr::V6(_) => ipv6_endpoint.unwrap(),
+    };
+
+    Ok((endpoint, connection))
+}
+
+pub async fn connect_server(
+    maybe_socket: Option<EndpointSocketSource>,
+    addresses: CompactVec<2, SocketAddr>,
+) -> io::Result<CompactVec<2, Endpoint>> {
+    let mut endpoints = CompactVec::<2, _>::new();
+
+    if let Some(socket) = maybe_socket {
+        endpoints.push(make_endpoint(socket, false, true)?);
+    }
+
+    for address in addresses {
+        let socket = match std::net::UdpSocket::bind(address) {
+            Ok(so) => so,
+            Err(error) => {
+                println!("Couldn't bind socket at {address}: {error}");
+                continue;
+            }
+        };
+
+        match make_endpoint(EndpointSocketSource::Simple(socket), false, true) {
+            Ok(ep) => endpoints.push(ep),
+            Err(error) => {
+                println!("Couldn't create endpoint at {address}: {error}");
+                continue;
+            }
+        }
+    }
+
+    match endpoints.is_empty() {
+        true => Err(Error::new(
+            ErrorKind::Other,
+            "Couldn't bind a socket to any of the provided addresses",
+        )),
+        false => Ok(endpoints),
     }
 }

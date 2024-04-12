@@ -1,4 +1,4 @@
-use std::{io, sync::Arc, time::Duration};
+use std::{io, net::SocketAddr, sync::Arc, time::Duration};
 
 use quinn::{ClientConfig, Endpoint, EndpointConfig, IdleTimeout, ServerConfig, TokioRuntime, TransportConfig, VarInt};
 
@@ -10,6 +10,15 @@ pub const MAX_IDLE_TIMEOUT_MILLIS: u32 = 4000;
 pub enum EndpointSocketSource {
     Simple(std::net::UdpSocket),
     Shared(SharedUdpSocket),
+}
+
+impl EndpointSocketSource {
+    pub fn local_addr(&self) -> io::Result<SocketAddr> {
+        match self {
+            Self::Simple(socket) => socket.local_addr(),
+            Self::Shared(socket) => socket.local_addr(),
+        }
+    }
 }
 
 pub fn make_endpoint(socket: EndpointSocketSource, is_client: bool, is_server: bool) -> io::Result<Endpoint> {

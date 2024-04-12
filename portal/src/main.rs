@@ -11,11 +11,13 @@ use std::{
 
 use args::{ArgumentsRequest, StartupArguments};
 
+use inlined::CompactVec;
 use tokio::task::LocalSet;
 
 use crate::{
-    args::StartupMode,
-    connect::{connect_client, connect_server},
+    args::{ConnectMethod, StartupMode},
+    endpoint::EndpointSocketSource,
+    puncher::PunchConnectResult,
 };
 
 mod args;
@@ -68,22 +70,56 @@ fn main() {
 async fn async_main(startup_args: StartupArguments) -> Result<(), Error> {
     println!("Startup arguments: {startup_args:?}");
 
+    let (maybe_socket, mut addresses, mut background_task_handle) = match startup_args.connect_method {
+        ConnectMethod::Direct(addresses) => (None, addresses, None),
+        ConnectMethod::Punch(punch_config) => {
+            let punch_result = connect::punch(punch_config, startup_args.startup_mode.is_server()).await?;
+
+            let (socket, address, background_task_handle) = match punch_result {
+                PunchConnectResult::Connect(socket, to_address) => {
+                    let socket = EndpointSocketSource::Simple(socket.into_std()?);
+                    (socket, to_address, None)
+                }
+                PunchConnectResult::Listen(socket, from_address, background_task_handle) => {
+                    let socket = EndpointSocketSource::Shared(socket);
+                    (socket, from_address, Some(background_task_handle))
+                }
+            };
+
+            (Some(socket), CompactVec::from(address), background_task_handle)
+        }
+    };
+
+    // On server mode, "addresses" is either the list of addresses to bind sockets at (with a non-holepunched connect
+    // method, when `maybe_socket` is `None`), or the list of addresses to allow incoming connections from (when using
+    // hole punching, when `maybe_socket` is `Some`).
+
     match startup_args.startup_mode {
         StartupMode::Client(client_config) => {
-            let (endpoint, connection) = connect_client(startup_args.connect_method).await?;
-            match client::run::run_client(connection, client_config).await {
+            let (endpoint, connection) = connect::connect_client(maybe_socket, addresses).await?;
+            background_task_handle.inspect(|handle| handle.abort());
+
+            match crate::client::run::run_client(connection, client_config).await {
                 Ok(()) => {}
                 Err(error) => eprintln!("Client finished with error: {error}"),
             }
             endpoint.wait_idle().await;
         }
         StartupMode::Server(_server_config) => {
-            let (endpoints, mut maybe_handle) = connect_server(startup_args.connect_method).await?;
-            let mut handles = Vec::with_capacity(endpoints.len());
+            let (bind_addresses, address_filter) = match &maybe_socket {
+                None => (addresses, None),
+                Some(_) => (CompactVec::new(), Some(addresses.pop().unwrap())),
+            };
+
+            let endpoints = connect::connect_server(maybe_socket, bind_addresses).await?;
+
+            let mut handles = Vec::new();
+            handles.reserve_exact(endpoints.len());
+
             for endpoint in endpoints {
-                let maybe_handle = maybe_handle.take();
+                let maybe_handle = background_task_handle.take();
                 let handle = tokio::task::spawn_local(async move {
-                    server::run::run_server(endpoint, maybe_handle).await;
+                    crate::server::run::run_server(endpoint, maybe_handle, address_filter).await;
                 });
 
                 handles.push(handle);

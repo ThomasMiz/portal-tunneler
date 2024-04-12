@@ -3,6 +3,7 @@ use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
 };
 
+use inlined::CompactVec;
 use portal_tunneler_proto::shared::TunnelSide;
 
 use super::{
@@ -103,11 +104,11 @@ impl StartupArgumentsParser {
 
     fn modify_connect_method_direct<F>(&mut self, arg: String, f: F) -> Result<(), ArgumentsError>
     where
-        F: FnOnce(String, &mut Vec<SocketAddr>) -> Result<(), ArgumentsError>,
+        F: FnOnce(String, &mut CompactVec<2, SocketAddr>) -> Result<(), ArgumentsError>,
     {
         match &mut self.connect_method {
             None => {
-                let mut sockets = Vec::new();
+                let mut sockets = CompactVec::new();
                 f(arg, &mut sockets)?;
                 self.connect_method = Some(ConnectMethod::Direct(sockets));
             }
@@ -172,7 +173,7 @@ impl StartupArgumentsParser {
 
     fn complete(self) -> Result<StartupArguments, ArgumentsError> {
         let startup_mode = self.startup_mode.unwrap_or_else(|| StartupMode::Server(StartServerConfig::new()));
-        let mut connect_method = self.connect_method.unwrap_or_else(|| ConnectMethod::Direct(Vec::new()));
+        let mut connect_method = self.connect_method.unwrap_or_else(|| ConnectMethod::Direct(CompactVec::new()));
 
         if let ConnectMethod::Direct(sockets) = &mut connect_method {
             if sockets.is_empty() {

@@ -32,9 +32,10 @@ pub async fn handle_incoming_bi_stream(
         }
     };
 
+    let maybe_target_address;
     let address = match &spec.target {
         TunnelTarget::Socks => {
-            let target_address = match request.maybe_target {
+            maybe_target_address = match request.maybe_target {
                 Some(addr) => addr,
                 None => {
                     eprintln!("The server specified an address as target on a static tunnel");
@@ -45,12 +46,10 @@ pub async fn handle_incoming_bi_stream(
                 }
             };
 
-            println!("The server did the SOCKS thing and told me to go to {target_address}");
-            target_address
+            println!("The server did the SOCKS thing and told me to go to {maybe_target_address}");
+            &maybe_target_address
         }
-        TunnelTarget::Address(address) => {
-            address.clone() // <-- TODO: This clone can definitely be avoided
-        }
+        TunnelTarget::Address(address) => address,
     };
 
     println!("Connecting connection from remote tunnel to {address}");

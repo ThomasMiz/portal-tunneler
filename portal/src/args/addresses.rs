@@ -4,7 +4,7 @@ use std::{
     net::{IpAddr, SocketAddr, ToSocketAddrs},
 };
 
-use inlined::InlineString;
+use inlined::{CompactVec, InlineString};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum SocketErrorType {
@@ -23,8 +23,8 @@ impl fmt::Display for SocketErrorType {
 
 /// Parses a socket address argument, doing domain name resolution if necessary. The resulting
 /// [`SocketAddr`] instances are pushed onto a `result_vec` vector.
-pub(super) fn parse_socket_arg(
-    result_vec: &mut Vec<SocketAddr>,
+pub(super) fn parse_socket_arg<const N: usize>(
+    result_vec: &mut CompactVec<N, SocketAddr>,
     arg: String,
     maybe_arg2: Option<String>,
     default_port: u16,
